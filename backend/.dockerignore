@@ -1,0 +1,20 @@
+# Exclude build output — the Docker builder re-runs Maven from scratch
+target/
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Git metadata (not needed inside the image)
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+HELP.md
