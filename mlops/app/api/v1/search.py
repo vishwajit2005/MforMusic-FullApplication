@@ -93,8 +93,9 @@ def semantic_search(
 
 def _pgvector_search(db: Session, query_vec, n: int) -> list[SemanticSearchResult]:
     """
-    cosine_distance operator (<->) — lower = more similar.
+    cosine_distance operator (<=>) — lower = more similar.
     Convert to similarity score: 1 - distance.
+    Matches HNSW index built with vector_cosine_ops.
     """
     vec_str = "[" + ",".join(f"{v:.6f}" for v in query_vec.tolist()) + "]"
 
@@ -103,10 +104,10 @@ def _pgvector_search(db: Session, query_vec, n: int) -> list[SemanticSearchResul
             song_id,
             title,
             artist_name,
-            1 - (embedding <-> :vec::vector) AS similarity
+            1 - (embedding <=> CAST(:vec AS vector)) AS similarity
         FROM song_embeddings
         WHERE embedding IS NOT NULL
-        ORDER BY embedding <-> :vec::vector
+        ORDER BY embedding <=> CAST(:vec AS vector)
         LIMIT :n
     """)
 

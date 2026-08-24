@@ -31,6 +31,15 @@ public class AsyncUploadService {
     @Autowired
     private CloudStorageService cloudStorageService;
 
+    @Autowired
+    private org.springframework.web.client.RestTemplate restTemplate;
+
+    @org.springframework.beans.factory.annotation.Value("${mlops.fastapi.url:http://localhost:8000}")
+    private String fastApiBaseUrl;
+
+    @org.springframework.beans.factory.annotation.Value("${mlops.fastapi.enabled:false}")
+    private boolean fastApiEnabled;
+
     @Async
     @Transactional
     public void uploadToSupabaseAsync(Long songId, String sourceUrl) {
@@ -55,6 +64,11 @@ public class AsyncUploadService {
                 song.setStoredInS3(Boolean.TRUE);
                 songRepository.save(song);
                 log.info("[BG-Upload] ✅ Upload complete for: {}", song.getTitle());
+
+                // Trigger audio feature extraction in FastAPI MLOps for content model growth
+                if (fastApiEnabled) {
+                    triggerFeatureExtraction(song, cloudUrl);
+                }
             } else {
                 log.warn("[BG-Upload] Upload returned null URL for: {}", song.getTitle());
                 song.setStoredInS3(Boolean.FALSE);
@@ -63,6 +77,34 @@ public class AsyncUploadService {
 
         } catch (Exception e) {
             log.error("[BG-Upload] Failed for song ID {}: {}", songId, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Dispatches a non-blocking request to FastAPI to extract 63 librosa features
+     * for organic growth of the content-based recommendation model.
+     */
+    private void triggerFeatureExtraction(Song song, String audioUrl) {
+        try {
+            String targetUrl = fastApiBaseUrl + "/api/v1/content/queue-feature-extraction";
+            java.util.Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("song_id", song.getExternalTrackId());
+            payload.put("audio_url", audioUrl);
+            payload.put("title", song.getTitle());
+            payload.put("artist_name", song.getArtistName());
+            payload.put("album", song.getAlbumName());
+            payload.put("language", song.getLanguage() != null ? song.getLanguage().toLowerCase() : "unknown");
+            payload.put("decade", "2020s");
+
+            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+            headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+            org.springframework.http.HttpEntity<java.util.Map<String, Object>> request =
+                    new org.springframework.http.HttpEntity<>(payload, headers);
+
+            restTemplate.postForEntity(targetUrl, request, Void.class);
+            log.info("[ContentModel] Dispatched feature extraction to FastAPI for song={}", song.getExternalTrackId());
+        } catch (Exception e) {
+            log.warn("[ContentModel] Failed to queue feature extraction for song {}: {}", song.getExternalTrackId(), e.getMessage());
         }
     }
 

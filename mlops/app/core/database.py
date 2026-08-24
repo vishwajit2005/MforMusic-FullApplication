@@ -24,12 +24,11 @@ class Base(DeclarativeBase):
     pass
 
 
-# ── pgvector extension ────────────────────────────────────────────────────────
+# ── pgvector extension & HNSW index ──────────────────────────────────────────
 def ensure_pgvector_extension() -> bool:
     """
     Attempts to enable the pgvector extension.
     Fails gracefully if not supported — CF still works without it.
-    pgvector is only needed for future content-based embedding similarity.
     """
     try:
         with engine.connect() as conn:
@@ -41,6 +40,27 @@ def ensure_pgvector_extension() -> bool:
         logger.warning(
             f"pgvector extension not available (non-critical — CF works without it): {e}"
         )
+        return False
+
+
+def ensure_song_embeddings_hnsw_index() -> bool:
+    """
+    Creates the HNSW index on song_embeddings.embedding using vector_cosine_ops
+    to enable sub-millisecond approximate nearest neighbor semantic search.
+    """
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_song_embeddings_hnsw 
+                ON song_embeddings 
+                USING hnsw (embedding vector_cosine_ops)
+                WITH (m = 16, ef_construction = 64);
+            """))
+            conn.commit()
+        logger.info("HNSW cosine index on song_embeddings.embedding is ready ✓")
+        return True
+    except Exception as e:
+        logger.warning(f"Could not create/verify HNSW index on song_embeddings: {e}")
         return False
 
 

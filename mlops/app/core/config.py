@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     # ── Recommendation defaults ──────────────────────────────────────────────
     TOP_N_RECOMMENDATIONS: int = 20
 
+    # ── Content-based model artifacts directory & retraining ─────────────────
+    # Directory containing nn_model.joblib, scaler.joblib, encoders, combined_features.csv, track_index.csv
+    CONTENT_MODEL_DIR: str = "app/data/content_model"
+    # Daily retraining interval (86400 seconds)
+    CONTENT_RETRAIN_INTERVAL_SECONDS: int = 86400
+    # Minimum un-incorporated extracted songs required to trigger automatic retraining
+    MIN_NEW_SONGS_FOR_CONTENT_RETRAIN: int = 20
+
     # ── Service ─────────────────────────────────────────────────────────────
     PORT: int = 8000
 

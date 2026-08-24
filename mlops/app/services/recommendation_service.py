@@ -13,6 +13,7 @@ from app.models.interaction import Interaction
 from app.models.song_embedding import SongEmbedding
 from app.schemas.interaction import InteractionIngest
 from app.services.cf_engine import cf_engine
+from app.services.content_recommendation_service import content_service
 from app.services.embedding_service import embed_song
 
 logger = logging.getLogger(__name__)
@@ -79,65 +80,90 @@ def get_recommendations(
     n: int | None = None,
 ) -> dict:
     """
-    Returns personalized recommendations for user_id.
-
-    Strategy:
-      1. If model untrained OR user has < MIN_INTERACTIONS_FOR_CF → popular fallback
-      2. If model trained but user not in model (joined after last retrain) → popular fallback
-      3. Normal path → ALS collaborative filtering
+    Returns personalized recommendations for user_id via a 3-tier fallback strategy:
+      1. Collaborative Filtering (ALS) — if CF is trained & user has >= MIN_INTERACTIONS_FOR_CF
+      2. Content-Based Similarity — if user has recent play/like interactions on songs
+         in the candidate dataset, query offline-trained NearestNeighbors
+      3. Popular Songs Fallback — if cold-start with no usable history or seed not found
     """
     top_n = n or settings.TOP_N_RECOMMENDATIONS
 
-    # Count this user's interactions
-    user_count = (
+    # Fetch user's interaction history (most recent first)
+    user_interactions = (
         db.query(Interaction)
         .filter(Interaction.user_id == user_id)
-        .count()
+        .order_by(Interaction.created_at.desc(), Interaction.id.desc())
+        .all()
     )
+    user_count = len(user_interactions)
+    interacted_song_ids = {i.song_id for i in user_interactions}
 
-    # ── Cold start ────────────────────────────────────────────────────────────
-    if not cf_engine.is_trained or user_count < settings.MIN_INTERACTIONS_FOR_CF:
+    # ── Tier 1: Collaborative Filtering ───────────────────────────────────────
+    if cf_engine.is_trained and user_count >= settings.MIN_INTERACTIONS_FOR_CF:
+        recs = cf_engine.recommend_for_user(user_id, top_n)
+        if recs:
+            logger.info(
+                f"[Recs] CF recommendations for user={user_id}: "
+                f"{len(recs)} tracks (model={cf_engine.model_version})"
+            )
+            return {
+                "user_id": user_id,
+                "recommendations": recs,
+                "model_version": cf_engine.model_version,
+                "total": len(recs),
+                "source": "collaborative_filtering",
+            }
         logger.info(
-            f"[Recs] Cold start for user={user_id} "
-            f"(interactions={user_count}, model_trained={cf_engine.is_trained}). "
-            "Returning popular songs."
+            f"[Recs] User {user_id} not in current CF model — checking content-based fallback."
         )
-        songs = cf_engine.get_popular_songs(db, top_n)
-        return {
-            "user_id": user_id,
-            "recommendations": songs,
-            "model_version": cf_engine.model_version,
-            "total": len(songs),
-            "source": "popular" if songs else "cold_start",
-        }
 
-    # ── CF recommendations ────────────────────────────────────────────────────
-    recs = cf_engine.recommend_for_user(user_id, top_n)
-
-    if not recs:
-        # User exists in DB but not in current model (joined after last retrain)
-        logger.info(
-            f"[Recs] User {user_id} not in current model — falling back to popular."
+    # ── Tier 2: Content-Based Similarity (Cold Start with Interaction History) ──
+    if content_service.is_ready and user_interactions:
+        # STRICT POSITIVE SIGNALS ONLY: like, play, download, playlist_add
+        # Negative signals (skip, unlike) are strictly forbidden from acting as seeds.
+        positive_types = {"like", "play", "download", "playlist_add"}
+        seed_interaction = next(
+            (
+                i for i in user_interactions
+                if (i.interaction_type or "").lower() in positive_types
+                and content_service.has_track(i.song_id)
+            ),
+            None,
         )
-        songs = cf_engine.get_popular_songs(db, top_n)
-        return {
-            "user_id": user_id,
-            "recommendations": songs,
-            "model_version": cf_engine.model_version,
-            "total": len(songs),
-            "source": "popular",
-        }
 
+        if seed_interaction:
+            seed_song_id = seed_interaction.song_id
+            content_recs = content_service.get_similar_songs(
+                seed_track_id=seed_song_id,
+                n=top_n,
+                exclude_ids=interacted_song_ids,
+            )
+            if content_recs:
+                logger.info(
+                    f"[Recs] Content-based recommendations for user={user_id} "
+                    f"(seed={seed_song_id}): {len(content_recs)} tracks "
+                    f"(model={content_service.model_version})"
+                )
+                return {
+                    "user_id": user_id,
+                    "recommendations": content_recs,
+                    "model_version": content_service.model_version,
+                    "total": len(content_recs),
+                    "source": "content_based",
+                }
+
+    # ── Tier 3: Popular Songs Fallback ────────────────────────────────────────
     logger.info(
-        f"[Recs] CF recommendations for user={user_id}: "
-        f"{len(recs)} tracks (model={cf_engine.model_version})"
+        f"[Recs] Cold start fallback to popular songs for user={user_id} "
+        f"(interactions={user_count}, cf_trained={cf_engine.is_trained}, content_ready={content_service.is_ready})."
     )
+    songs = cf_engine.get_popular_songs(db, top_n)
     return {
         "user_id": user_id,
-        "recommendations": recs,
+        "recommendations": songs,
         "model_version": cf_engine.model_version,
-        "total": len(recs),
-        "source": "collaborative_filtering",
+        "total": len(songs),
+        "source": "popular" if songs else "cold_start",
     }
 
 
@@ -146,47 +172,65 @@ def get_recommendations(
 def _upsert_song_embedding_async(db: Session, payload: InteractionIngest):
     """
     Non-blocking: spawn a daemon thread to generate + store song embedding.
-    Only runs on first encounter of each song_id to avoid redundant work.
-
-    NOTE: Since InteractionIngest only carries song_id (JioSaavn externalTrackId),
-    the embedding uses song_id as text input until Spring Boot enriches the
-    SongEmbedding row with proper title + artist via the /ingest endpoint.
-    Spring Boot must forward `song_title` and `song_artist` for quality embeddings.
+    Resolves human-readable title & artist from payload or content_service metadata.
+    Avoids storing raw opaque IDs as titles.
     """
     def _worker():
         from app.core.database import SessionLocal
         bg_db = SessionLocal()
         try:
+            # 1. Resolve human-readable title & artist
+            title = getattr(payload, "song_title", None)
+            artist = getattr(payload, "song_artist", None)
+
+            # If title is missing or equals song_id, lookup from candidate dataset
+            if not title or title == payload.song_id:
+                meta = content_service.get_track_metadata(payload.song_id)
+                if meta:
+                    title = meta.get("title")
+                    if not artist:
+                        artist = meta.get("artist")
+
             existing = bg_db.query(SongEmbedding).filter(
                 SongEmbedding.song_id == payload.song_id
             ).first()
 
-            if existing is not None and existing.embedding is not None:
-                return  # Already embedded — skip
+            # If existing already has valid title and embedding, skip
+            if (
+                existing is not None
+                and existing.embedding is not None
+                and existing.title
+                and existing.title != payload.song_id
+            ):
+                return
 
-            # Use song_title + song_artist if provided in payload, else fall back to song_id
-            title = getattr(payload, "song_title", None) or payload.song_id
-            artist = getattr(payload, "song_artist", None)
+            # If we still have no title, don't generate garbage embedding on opaque ID
+            if not title or title == payload.song_id:
+                if existing and existing.title and existing.title != payload.song_id:
+                    title = existing.title
+                    artist = artist or existing.artist_name
+                else:
+                    logger.debug(f"Skipping embedding for {payload.song_id}: no human-readable title available.")
+                    return
 
             vec = embed_song(title, artist)
             if vec is None:
                 return
 
             if existing:
-                # Update embedding; also update title/artist if now available
                 existing.embedding = vec.tolist()
-                if getattr(payload, "song_title", None):
-                    existing.title = payload.song_title
-                if getattr(payload, "song_artist", None):
-                    existing.artist_name = payload.song_artist
+                existing.title = title
+                if artist:
+                    existing.artist_name = artist
             else:
                 new_entry = SongEmbedding(
                     song_id=payload.song_id,
-                    title=title,           # placeholder until enriched by Spring Boot
+                    title=title,
                     artist_name=artist,
                     embedding=vec.tolist(),
                 )
                 bg_db.add(new_entry)
+
             bg_db.commit()
             logger.debug(f"Song embedding stored for song_id={payload.song_id} title={title!r}")
         except Exception as e:

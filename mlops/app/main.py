@@ -25,12 +25,15 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1 import interactions, recommendations
 from app.api.v1 import search as search_router
+from app.api.v1 import content as content_router
 from app.consumers.kafka_consumer import get_kafka_consumer
 from app.core.config import get_settings
-from app.core.database import Base, SessionLocal, engine, ensure_pgvector_extension
-from app.models.interaction import Interaction      # noqa: F401 — ensures table is created
-from app.models.song_embedding import SongEmbedding # noqa: F401 — ensures table is created
+from app.core.database import Base, SessionLocal, engine, ensure_pgvector_extension, ensure_song_embeddings_hnsw_index
+from app.models.interaction import Interaction          # noqa: F401 — ensures table is created
+from app.models.song_embedding import SongEmbedding     # noqa: F401 — ensures table is created
+from app.models.song_audio_feature import SongAudioFeature # noqa: F401 — ensures table is created
 from app.services.cf_engine import cf_engine
+from app.services.content_recommendation_service import content_service
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,14 +43,25 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-# ── Periodic retrain job (called by APScheduler) ──────────────────────────────
-def _scheduled_retrain():
-    logger.info("[Scheduler] Hourly retrain job triggered.")
+# ── Periodic retrain jobs (called by APScheduler) ─────────────────────────────
+def _scheduled_cf_retrain():
+    logger.info("[Scheduler] Hourly CF retrain job triggered.")
     db = SessionLocal()
     try:
         cf_engine.train(db)
     except Exception as e:
-        logger.error(f"[Scheduler] Retrain failed: {e}")
+        logger.error(f"[Scheduler] CF retrain failed: {e}")
+    finally:
+        db.close()
+
+
+def _scheduled_content_retrain():
+    logger.info("[Scheduler] Scheduled Content-based model retrain job triggered.")
+    db = SessionLocal()
+    try:
+        content_service.train(db, force=False)
+    except Exception as e:
+        logger.error(f"[Scheduler] Content retrain failed: {e}")
     finally:
         db.close()
 
@@ -64,8 +78,10 @@ async def lifespan(app: FastAPI):
     # 2. Create database tables
     try:
         Interaction.__table__.create(bind=engine, checkfirst=True)
+        SongAudioFeature.__table__.create(bind=engine, checkfirst=True)
         if has_vector:
             SongEmbedding.__table__.create(bind=engine, checkfirst=True)
+            ensure_song_embeddings_hnsw_index()
         logger.info("PostgreSQL tables created/verified.")
     except Exception as e:
         logger.warning(f"Table creation note: {e}")
@@ -84,23 +100,41 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
-    # 4. Hourly retrain scheduler
+    # 4. Retrain schedulers (CF hourly, Content model configurable)
     scheduler = BackgroundScheduler()
     scheduler.add_job(
-        _scheduled_retrain,
+        _scheduled_cf_retrain,
         trigger="interval",
         seconds=settings.RETRAIN_INTERVAL_SECONDS,
         id="hourly_cf_retrain",
         name="Hourly CF Model Retrain",
         replace_existing=True,
     )
+    scheduler.add_job(
+        _scheduled_content_retrain,
+        trigger="interval",
+        seconds=settings.CONTENT_RETRAIN_INTERVAL_SECONDS,
+        id="content_model_retrain",
+        name="Content Model Retrain",
+        replace_existing=True,
+    )
     scheduler.start()
     logger.info(
-        f"Retrain scheduler started — firing every "
-        f"{settings.RETRAIN_INTERVAL_SECONDS}s."
+        f"Retrain schedulers started — CF every {settings.RETRAIN_INTERVAL_SECONDS}s, "
+        f"Content Model every {settings.CONTENT_RETRAIN_INTERVAL_SECONDS}s."
     )
 
-    # 5. Kafka consumer — Phase 9 event-driven ingestion
+    # 5. Load Content-Based Recommendation Model Artifacts
+    try:
+        content_loaded = content_service.load_artifacts(settings.CONTENT_MODEL_DIR)
+        if content_loaded:
+            logger.info(f"Content-based model ready: {content_service.model_version}")
+        else:
+            logger.info("Content-based model not loaded (artifacts missing or directory empty) — will use popular fallback.")
+    except Exception as e:
+        logger.warning(f"Content model startup loading failed: {e}")
+
+    # 6. Kafka consumer — Phase 9 event-driven ingestion
     kafka_consumer = get_kafka_consumer()
     if kafka_consumer:
         kafka_consumer.start()
@@ -118,9 +152,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="MforMusic MLOps Recommendation Engine",
     description=(
-        "Collaborative Filtering microservice for the MforMusic platform. "
-        "Ingests telemetry events from Spring Boot and serves personalized "
-        "track recommendations using ALS (Alternating Least Squares)."
+        "Collaborative Filtering & Content-based Similarity microservice for the MforMusic platform. "
+        "Ingests telemetry and audio streams, serves personalized track recommendations and semantic search."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -163,6 +196,11 @@ app.include_router(
     tags=["Recommendations"],
 )
 app.include_router(
+    content_router.router,
+    prefix="/api/v1/content",
+    tags=["Content-Based Model"],
+)
+app.include_router(
     search_router.router,
     prefix="/api/v1/search",
     tags=["Semantic Search"],
@@ -174,6 +212,11 @@ app.include_router(
 def health():
     return {
         "status": "ok",
+        "cf_model_trained": cf_engine.is_trained,
+        "cf_model_version": cf_engine.model_version,
+        "content_model_ready": content_service.is_ready,
+        "content_model_version": content_service.model_version,
+        # Keep backwards compatibility for health check clients
         "model_trained": cf_engine.is_trained,
         "model_version": cf_engine.model_version,
     }

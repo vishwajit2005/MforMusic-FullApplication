@@ -16,9 +16,13 @@ implicit==0.7.2
 # Numerical — scipy omitted here; install via: pip install scipy --pre --only-binary :all:
 numpy>=1.26
 
-# Content-based filtering & semantic search (Phase 6)
+# Content-based filtering & semantic search (Phase 6 & 7)
 sentence-transformers==3.3.1
 scikit-learn==1.5.2
+pandas>=2.0.0
+joblib>=1.3.0
+librosa>=0.10.2
+soundfile>=0.12.1
 
 # Observability — Prometheus metrics scrape endpoint (Phase 8)
 prometheus-fastapi-instrumentator==7.0.0
