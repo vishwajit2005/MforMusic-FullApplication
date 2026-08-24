@@ -1,0 +1,60 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MforMusic Monitoring Stack
+#
+# Prometheus → scrapes metrics from Spring Boot (/actuator/prometheus)
+#              and FastAPI (/metrics via prometheus-fastapi-instrumentator)
+# Alertmanager → fires Slack/email alerts on 5xx spikes or service down
+# Grafana → dashboards (JVM, API latency, CF model health, Kafka lag)
+#
+# Usage:
+#   docker compose -f monitoring/docker-compose.monitoring.yml up -d
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: mformusic-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"    # allows hot-reload via POST /-/reload
+      - "--web.enable-admin-api"
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: mformusic-alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: mformusic-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_FEATURE_TOGGLES_ENABLE: "traceToMetrics"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+
+volumes:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:

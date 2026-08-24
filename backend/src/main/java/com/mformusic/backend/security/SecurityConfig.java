@@ -32,9 +32,13 @@ public class SecurityConfig {
             .sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                // Public auth endpoints
+                // Public: register / login
                 .requestMatchers("/api/v1/auth/**").permitAll()
-                // All other endpoints require a valid JWT
+                // Public: telemetry — allows events even from clients with expired JWTs
+                .requestMatchers("/api/v1/telemetry/**").permitAll()
+                // Public: Actuator health + Prometheus scrape (internal network only)
+                .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
+                // Everything else requires a valid JWT
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);

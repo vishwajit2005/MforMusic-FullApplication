@@ -1,0 +1,166 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MforMusic — Local Full-Stack Development Environment
+#
+# Services:
+#   mysql       — Aiven MySQL mirror (local dev only)
+#   postgres    — pgvector PostgreSQL for MLOps embeddings
+#   zookeeper   — Kafka dependency
+#   kafka       — Event bus (Phase 9)
+#   backend     — Spring Boot (port 8080)
+#   mlops       — FastAPI recommendation engine (port 8000)
+#
+# Usage:
+#   docker compose up -d            # start all services
+#   docker compose up backend mlops # start just the apps
+#   docker compose logs -f backend  # tail logs
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── MySQL (local dev mirror) ───────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: mformusic-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: mformusic_db
+      MYSQL_ROOT_PASSWORD: localdev
+      MYSQL_USER: mformusic
+      MYSQL_PASSWORD: localdev
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-plocaldev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── PostgreSQL + pgvector (MLOps embeddings) ───────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: mformusic-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mlops_db
+      POSTGRES_USER: mlops
+      POSTGRES_PASSWORD: mlops
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlops -d mlops_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Zookeeper (Kafka dependency) ───────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: mformusic-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+
+  # ── Apache Kafka ───────────────────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: mformusic-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ── Spring Boot Backend ────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mformusic-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: mformusic_db
+      DB_USER: mformusic
+      DB_PASSWORD: localdev
+      JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_BUCKET: tracks
+      MLOPS_FASTAPI_ENABLED: "true"
+      MLOPS_FASTAPI_URL: http://mlops:8000
+      # Kafka (Phase 9)
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TELEMETRY_ENABLED: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── FastAPI MLOps Engine ───────────────────────────────────────────────────
+  mlops:
+    build:
+      context: ./mlops
+      dockerfile: Dockerfile
+    container_name: mformusic-mlops
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://mlops:mlops@postgres:5432/mlops_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TELEMETRY_TOPIC: mformusic.telemetry.interactions
+      KAFKA_CONSUMER_GROUP: mlops-recommendation-engine
+    volumes:
+      # Persist downloaded sentence-transformers model across restarts
+      - mlops_model_cache:/app/.model_cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s  # sentence-transformers takes time on first start
+
+volumes:
+  mysql_data:
+  postgres_data:
+  zookeeper_data:
+  zookeeper_log:
+  kafka_data:
+  mlops_model_cache:

@@ -41,6 +41,7 @@ import com.mformusic.frontend.ui.theme.*
 import com.mformusic.frontend.viewmodel.HomeViewModel
 import com.mformusic.frontend.viewmodel.PlayerViewModel
 import com.mformusic.frontend.viewmodel.SearchViewModel
+import com.mformusic.frontend.ui.screens.ForYouScreen
 import java.util.Calendar
 import kotlinx.coroutines.launch
 
@@ -139,6 +140,7 @@ fun MainAppScreen(tokenDataStore: TokenDataStore) {
                     )
                 }
                 composable(Screen.Search.route) { SearchScreen() }
+                composable(Screen.ForYou.route) { ForYouScreen() }
                 composable(Screen.LikedSongs.route) {
                     LikedSongsScreen(
                         onBackClick = { navController.popBackStack() }

@@ -3,18 +3,21 @@ package com.mformusic.frontend
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.lifecycle.lifecycleScope
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import com.mformusic.frontend.data.TokenDataStore
 import com.mformusic.frontend.navigation.Screen
 import com.mformusic.frontend.network.PlayerManager
 import com.mformusic.frontend.network.RetrofitClient
+import com.mformusic.frontend.telemetry.TelemetryRepository
 import com.mformusic.frontend.ui.screens.LoginScreen
 import com.mformusic.frontend.ui.screens.MainAppScreen
 import com.mformusic.frontend.ui.screens.RegisterScreen
 import com.mformusic.frontend.ui.screens.SplashScreen
 import com.mformusic.frontend.ui.theme.MforMusicTheme
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -23,10 +26,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Initialize singletons
+        // Initialize singletons & repositories
         tokenDataStore = TokenDataStore(applicationContext)
         RetrofitClient.init(tokenDataStore)
-        PlayerManager.initialize(this)
+
+        lifecycleScope.launch {
+            val userId = tokenDataStore.getUserId()?.toString() ?: ""
+            PlayerManager.initialize(this@MainActivity, userId)
+            TelemetryRepository.start()
+        }
 
         setContent {
             MforMusicTheme {
@@ -56,7 +64,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // Prevent ExoPlayer memory leak
+        // Prevent ExoPlayer memory leak & stop telemetry worker
         PlayerManager.release()
+        TelemetryRepository.stop()
     }
 }

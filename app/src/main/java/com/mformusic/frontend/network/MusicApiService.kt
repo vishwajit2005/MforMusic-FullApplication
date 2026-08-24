@@ -40,4 +40,11 @@ interface MusicApiService {
 
     @GET("api/v1/songs/liked")
     suspend fun getLikedSongs(): Response<List<SongResponse>>
+
+    // ── Recommendations (JWT required — personalised "For You" feed) ──────────
+
+    @GET("api/v1/recommendations")
+    suspend fun getRecommendations(
+        @Query("n") n: Int = 20
+    ): Response<List<SongResponse>>
 }

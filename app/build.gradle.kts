@@ -22,6 +22,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Android emulator default alias for localhost:8080
+            // For physical devices over USB, run: adb reverse tcp:8080 tcp:8080
+            buildConfigField("String", "BASE_URL", "\"http://10.0.2.2:8080/\"")
+        }
         release {
             buildConfigField("String", "BASE_URL", "\"https://mformusic-backend.onrender.com/\"")
             isMinifyEnabled = false
@@ -82,6 +87,9 @@ dependencies {
     implementation("androidx.room:room-runtime:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
+
+    // WorkManager — background predictive cache pre-fetching recommended songs
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
 
     // Testing
     testImplementation(libs.junit)

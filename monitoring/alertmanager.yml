@@ -1,0 +1,64 @@
+global:
+  resolve_timeout: 5m
+  # Slack webhook — set SLACK_WEBHOOK_URL in your CI/CD secrets or .env
+  # Get this from: Slack → Apps → Incoming Webhooks → Add to Slack
+
+route:
+  group_by: ["alertname", "job"]
+  group_wait: 30s       # Wait before sending first alert in a group
+  group_interval: 5m    # How long to wait before sending a notification about new alerts
+  repeat_interval: 1h   # Resend if still firing after this interval
+  receiver: slack-critical
+
+  routes:
+    # Critical alerts → immediate Slack notification
+    - matchers:
+        - severity = critical
+      receiver: slack-critical
+      continue: false
+
+    # Warning alerts → lower-urgency channel
+    - matchers:
+        - severity = warning
+      receiver: slack-warnings
+      group_interval: 10m
+      repeat_interval: 4h
+
+receivers:
+
+  - name: slack-critical
+    slack_configs:
+      - api_url: "${SLACK_WEBHOOK_CRITICAL}"
+        channel: "#mformusic-alerts-critical"
+        send_resolved: true
+        title: '{{ template "slack.default.title" . }}'
+        title_link: 'http://grafana:3000'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          *Since:* {{ .StartsAt | since }}
+          {{ end }}
+        color: '{{ if eq .Status "firing" }}#FF0000{{ else }}#36a64f{{ end }}'
+
+  - name: slack-warnings
+    slack_configs:
+      - api_url: "${SLACK_WEBHOOK_WARNINGS}"
+        channel: "#mformusic-alerts"
+        send_resolved: true
+        title: '{{ template "slack.default.title" . }}'
+        text: |
+          {{ range .Alerts }}
+          *{{ .Annotations.summary }}*
+          {{ .Annotations.description }}
+          {{ end }}
+        color: '{{ if eq .Status "firing" }}#FFA500{{ else }}#36a64f{{ end }}'
+
+inhibit_rules:
+  # Suppress warnings when critical alert for the same service is firing
+  - source_matchers:
+      - severity = critical
+    target_matchers:
+      - severity = warning
+    equal: ["job"]

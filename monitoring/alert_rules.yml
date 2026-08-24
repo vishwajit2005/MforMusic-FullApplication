@@ -1,0 +1,69 @@
+groups:
+  - name: mformusic_alerts
+    rules:
+
+      # ── Service Down ───────────────────────────────────────────────────────
+      - alert: BackendDown
+        expr: up{job="mformusic-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "🔴 Spring Boot backend is DOWN"
+          description: "The mformusic-backend service has been unreachable for > 1 minute. Check Render.com logs."
+
+      - alert: MLOpsDown
+        expr: up{job="mformusic-mlops"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "⚠️ FastAPI MLOps engine is DOWN"
+          description: "Recommendations and semantic search are unavailable. Android clients will fall back to popular songs."
+
+      # ── High 5xx Error Rate ────────────────────────────────────────────────
+      - alert: High5xxRate
+        expr: |
+          rate(http_server_requests_seconds_count{status=~"5..", job="mformusic-backend"}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "🔴 High 5xx error rate on Spring Boot"
+          description: "More than 6 5xx errors/minute sustained for 2 minutes. Investigate immediately."
+
+      # ── Slow API Response ──────────────────────────────────────────────────
+      - alert: SlowAPIResponse
+        expr: |
+          histogram_quantile(0.95,
+            rate(http_server_requests_seconds_bucket{job="mformusic-backend"}[5m])
+          ) > 2.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "⚠️ p95 API latency > 2s"
+          description: "95th percentile response time is above 2 seconds. Check DB connection pool and Aiven MySQL."
+
+      # ── JVM Memory Pressure ────────────────────────────────────────────────
+      - alert: JVMHeapHigh
+        expr: |
+          jvm_memory_used_bytes{area="heap", job="mformusic-backend"}
+            / jvm_memory_max_bytes{area="heap", job="mformusic-backend"} > 0.85
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "⚠️ JVM heap usage > 85%"
+          description: "Spring Boot heap is at {{ $value | humanizePercentage }}. Risk of OOM — consider scaling up."
+
+      # ── HikariCP Connection Pool Exhaustion ───────────────────────────────
+      - alert: DBConnectionPoolExhausted
+        expr: |
+          hikaricp_connections_pending{job="mformusic-backend"} > 2
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "⚠️ HikariCP pool has pending connection requests"
+          description: "{{ $value }} threads are waiting for a DB connection. Increase hikari.maximum-pool-size."

@@ -3,11 +3,16 @@ package com.mformusic.frontend.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.mformusic.frontend.model.SongResponse
-import com.mformusic.frontend.network.RetrofitClient
-import com.mformusic.frontend.network.PlayerManager
+import com.mformusic.frontend.data.TokenDataStore
 import com.mformusic.frontend.data.local.AppDatabase
 import com.mformusic.frontend.data.repository.DownloadRepository
+import com.mformusic.frontend.model.SongResponse
+import com.mformusic.frontend.network.PlayerManager
+import com.mformusic.frontend.network.RetrofitClient
+import com.mformusic.frontend.telemetry.InteractionType
+import com.mformusic.frontend.telemetry.SessionManager
+import com.mformusic.frontend.telemetry.TelemetryEvent
+import com.mformusic.frontend.telemetry.TelemetryRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,7 +20,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
- * ViewModel wrapping PlayerManager state, database persistence and download manager.
+ * ViewModel wrapping PlayerManager state, database persistence, download manager, and telemetry.
  * Exposes player state to Compose UI and survives recomposition.
  */
 class PlayerViewModel(application: Application) : AndroidViewModel(application) {
@@ -23,6 +28,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val api = RetrofitClient.musicApiService
     private val db = AppDatabase.getDatabase(application)
     private val dao = db.downloadedSongDao()
+    private val tokenDataStore = TokenDataStore(application.applicationContext)
+
+    private var currentUserId: String = ""
 
     val isPlaying: StateFlow<Boolean> = PlayerManager.isPlaying
     val currentTrack: StateFlow<SongResponse?> = PlayerManager.currentTrack
@@ -45,6 +53,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     val isDownloading: StateFlow<Boolean> = _isDownloading.asStateFlow()
 
     init {
+        // Load userId asynchronously for telemetry
+        viewModelScope.launch {
+            currentUserId = tokenDataStore.getUserId()?.toString() ?: ""
+        }
+
         // Observe currentTrack to check download state
         viewModelScope.launch {
             currentTrack.collectLatest { track ->
@@ -93,9 +106,23 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 if (response.isSuccessful && response.body() != null) {
                     val updatedSong = response.body()!!
                     PlayerManager.setCurrentTrackLiked(updatedSong.liked)
+
+                    // Ensure userId is populated
+                    if (currentUserId.isBlank()) {
+                        currentUserId = tokenDataStore.getUserId()?.toString() ?: ""
+                    }
+
+                    TelemetryRepository.enqueue(
+                        TelemetryEvent(
+                            userId = currentUserId,
+                            songId = song.externalTrackId,
+                            interactionType = if (!song.liked) InteractionType.LIKE.name.lowercase() else InteractionType.UNLIKE.name.lowercase(),
+                            sessionId = SessionManager.sessionId
+                        )
+                    )
                 }
             } catch (e: Exception) {
-                // Ignore or log error
+                // Silently ignore telemetry failure
             }
         }
     }
@@ -110,6 +137,20 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 val success = DownloadRepository.downloadSong(getApplication(), song)
                 if (success) {
                     _isDownloaded.value = true
+
+                    // Ensure userId is populated
+                    if (currentUserId.isBlank()) {
+                        currentUserId = tokenDataStore.getUserId()?.toString() ?: ""
+                    }
+
+                    TelemetryRepository.enqueue(
+                        TelemetryEvent(
+                            userId = currentUserId,
+                            songId = song.externalTrackId,
+                            interactionType = InteractionType.DOWNLOAD.name.lowercase(),
+                            sessionId = SessionManager.sessionId
+                        )
+                    )
                 }
             }
         }

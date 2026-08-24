@@ -1,0 +1,135 @@
+name: MLOps — CI / CD
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "mlops/**"
+      - ".github/workflows/mlops-ci-cd.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "mlops/**"
+
+env:
+  PYTHON_VERSION: "3.12"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/mlops
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # CI — Lint + Test
+  # ─────────────────────────────────────────────────────────────────────────
+  test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: mlops_test
+          POSTGRES_USER: mlops
+          POSTGRES_PASSWORD: testpwd
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd="pg_isready -U mlops -d mlops_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: mlops/requirements.txt
+
+      - name: Install dependencies
+        working-directory: mlops
+        run: |
+          pip install --upgrade pip
+          pip install "numpy>=1.26" --only-binary :all:
+          pip install scipy --only-binary :all:
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx
+
+      - name: Run import & scoring unit tests
+        working-directory: mlops
+        env:
+          DATABASE_URL: postgresql://mlops:testpwd@localhost:5432/mlops_test
+          KAFKA_BOOTSTRAP_SERVERS: ""        # Kafka disabled in CI
+          KAFKA_TELEMETRY_TOPIC: mformusic.telemetry.interactions
+          KAFKA_CONSUMER_GROUP: mlops-ci-test
+        run: |
+          python -W ignore -c "
+          import sys; sys.path.insert(0, '.')
+          from app.services.cf_engine import cf_engine, _compute_score
+          from app.services.embedding_service import embed_song
+          from app.api.v1 import search as search_router
+          from app.main import app
+
+          # Scoring regression tests
+          assert abs(_compute_score('play',  1.0) - 3.0)  < 0.001
+          assert abs(_compute_score('like',  0.0) - 4.0)  < 0.001
+          assert abs(_compute_score('skip',  0.0) - 0.01) < 0.001
+          routes = [r.path for r in app.routes if hasattr(r, 'path')]
+          assert '/api/v1/search/semantic' in routes
+          assert '/api/v1/interactions/ingest' in routes
+          print('All CI tests passed ✓')
+          "
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # CD — Build image + Deploy to Render
+  # ─────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Build & Deploy to Render
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./mlops
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trigger Render Deploy Hook
+        if: secrets.RENDER_DEPLOY_HOOK_MLOPS != ''
+        run: |
+          curl -s --fail-with-body \
+            -X POST "${{ secrets.RENDER_DEPLOY_HOOK_MLOPS }}" \
+            | jq .

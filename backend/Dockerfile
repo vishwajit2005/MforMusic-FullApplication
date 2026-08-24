@@ -1,59 +1,44 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 1 — BUILD
-#   Downloads dependencies, compiles source, and packages the fat jar.
-#   Using the official Maven image bundled with Eclipse Temurin JDK 21.
+# Stage 1: Build — Maven + JDK 21
 # ─────────────────────────────────────────────────────────────────────────────
-FROM maven:3.9.6-eclipse-temurin-21 AS builder
+FROM eclipse-temurin:21-jdk-alpine AS builder
 
 WORKDIR /build
 
-# Copy the Maven wrapper and POM first so Docker can cache the dependency
-# layer independently of source-code changes.
+# Cache Maven dependencies — only invalidated when pom.xml changes
 COPY pom.xml .
-COPY .mvn/ .mvn/
 COPY mvnw .
+COPY .mvn .mvn
 
-# Pre-download all dependencies (cached unless pom.xml changes)
-RUN mvn dependency:go-offline -B --no-transfer-progress
+RUN chmod +x mvnw && \
+    ./mvnw dependency:go-offline -q
 
-# Copy the full source tree and build the executable fat jar.
-# -DskipTests avoids running unit tests during image build; tests should be
-# run separately in CI before building the production image.
-COPY src/ src/
-RUN mvn package -B -DskipTests --no-transfer-progress
+# Copy source and build (skip tests — tests run in CI, not in Docker build)
+COPY src src
+RUN ./mvnw package -DskipTests -q
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 2 — RUNTIME
-#   Lean JRE-only image — no Maven, no source, no intermediate artifacts.
-#   Eclipse Temurin 21 on Ubuntu Jammy (LTS) for a stable, small footprint.
+# Stage 2: Runtime — JRE 21 (slim)
 # ─────────────────────────────────────────────────────────────────────────────
-FROM eclipse-temurin:21-jre-jammy AS runtime
-
-# Create a non-root system user for security best practice
-RUN groupadd --system appgroup && \
-    useradd  --system --gid appgroup --no-create-home appuser
+FROM eclipse-temurin:21-jre-alpine AS runtime
 
 WORKDIR /app
 
-# Copy only the fat jar produced by the build stage
-COPY --from=builder /build/target/backend-0.0.1-SNAPSHOT.jar app.jar
+# Non-root user for security
+RUN addgroup -S mformusic && adduser -S mformusic -G mformusic
+USER mformusic
 
-# Give the non-root user ownership of the app directory
-RUN chown -R appuser:appgroup /app
+# Copy only the built JAR
+COPY --from=builder /build/target/*.jar app.jar
 
-USER appuser
-
-# Render.com routes external traffic to port 8080 by default
+# Render passes PORT via environment variable; default 8080
 EXPOSE 8080
 
-# ── JVM tuning for container environments ────────────────────────────────────
-# -XX:+UseContainerSupport   → respect cgroup CPU/memory limits (default in 11+,
-#                               explicit here for clarity)
-# -XX:MaxRAMPercentage=75.0  → use 75 % of the container's RAM as heap, leaving
-#                               headroom for non-heap / Metaspace / threads
-# -Djava.security.egd=...    → faster SecureRandom seed on Linux (speeds startup)
+# JVM tuning for containerized environments:
+#   -XX:+UseContainerSupport  — respect cgroup memory limits
+#   -XX:MaxRAMPercentage=75.0 — leave 25% for OS/JVM overhead
 ENTRYPOINT ["java", \
-    "-XX:+UseContainerSupport", \
-    "-XX:MaxRAMPercentage=75.0", \
-    "-Djava.security.egd=file:/dev/./urandom", \
-    "-jar", "app.jar"]
+  "-XX:+UseContainerSupport", \
+  "-XX:MaxRAMPercentage=75.0", \
+  "-Djava.security.egd=file:/dev/./urandom", \
+  "-jar", "app.jar"]

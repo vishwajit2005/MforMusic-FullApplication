@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MforMusic Logback Configuration
+  ─────────────────────────────────────────────────────────────────────────────
+  • prod / docker profiles  → JSON appender (Logstash encoder)
+                              readable by Grafana Loki / Promtail / ELK
+  • default (local dev)     → human-readable coloured console output
+
+  Structured JSON fields for tracing a request end-to-end:
+    timestamp, level, logger, message, thread, requestId, userId, service
+-->
+<configuration>
+
+    <springProperty scope="context" name="APP_NAME" source="spring.application.name" defaultValue="mformusic-backend"/>
+
+    <!-- ── Dev / local: pretty console ──────────────────────────────────── -->
+    <springProfile name="!prod,!docker">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>%d{HH:mm:ss.SSS} %highlight(%-5level) [%cyan(%thread)] %logger{36} - %msg%n</pattern>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+        <logger name="com.mformusic" level="DEBUG"/>
+    </springProfile>
+
+    <!-- ── Production / Docker: structured JSON ──────────────────────────── -->
+    <springProfile name="prod,docker">
+        <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <!-- Custom fields present on every log line -->
+                <customFields>{"service":"${APP_NAME}"}</customFields>
+                <!-- Include MDC fields (requestId, userId injected by filter) -->
+                <includeMdc>true</includeMdc>
+                <!-- Short logger name saves bandwidth -->
+                <shortenedLoggerNameLength>36</shortenedLoggerNameLength>
+            </encoder>
+        </appender>
+
+        <!-- Rolling file backup (7 days, 500 MB max per file) -->
+        <appender name="JSON_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>/var/log/mformusic/backend.log</file>
+            <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                <fileNamePattern>/var/log/mformusic/backend.%d{yyyy-MM-dd}.log.gz</fileNamePattern>
+                <maxHistory>7</maxHistory>
+                <totalSizeCap>2GB</totalSizeCap>
+            </rollingPolicy>
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <customFields>{"service":"${APP_NAME}"}</customFields>
+                <includeMdc>true</includeMdc>
+            </encoder>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="JSON_CONSOLE"/>
+            <appender-ref ref="JSON_FILE"/>
+        </root>
+        <!-- Noisy framework loggers silenced in prod -->
+        <logger name="org.hibernate.SQL" level="WARN"/>
+        <logger name="org.springframework.web" level="WARN"/>
+        <logger name="com.mformusic" level="INFO"/>
+    </springProfile>
+
+</configuration>

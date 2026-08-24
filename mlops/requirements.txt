@@ -1,0 +1,30 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# Database
+sqlalchemy==2.0.35
+psycopg2-binary==2.9.9
+pgvector==0.3.2
+
+# Data validation
+pydantic==2.9.2
+pydantic-settings==2.5.2
+
+# Collaborative Filtering (ALS)
+implicit==0.7.2
+
+# Numerical — scipy omitted here; install via: pip install scipy --pre --only-binary :all:
+numpy>=1.26
+
+# Content-based filtering & semantic search (Phase 6)
+sentence-transformers==3.3.1
+scikit-learn==1.5.2
+
+# Observability — Prometheus metrics scrape endpoint (Phase 8)
+prometheus-fastapi-instrumentator==7.0.0
+
+# Kafka consumer — event-driven telemetry ingestion (Phase 9)
+kafka-python-ng==2.2.3
+
+# Scheduling
+apscheduler==3.10.4

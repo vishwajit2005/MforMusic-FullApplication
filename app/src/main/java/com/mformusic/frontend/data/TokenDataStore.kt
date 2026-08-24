@@ -45,4 +45,6 @@ class TokenDataStore(private val context: Context) {
     }
 
     suspend fun hasToken(): Boolean = !getToken().isNullOrBlank()
+
+    suspend fun getUserId(): Long? = context.dataStore.data.first()[PrefKeys.USER_ID]
 }

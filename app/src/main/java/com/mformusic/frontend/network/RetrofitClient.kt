@@ -48,4 +48,8 @@ object RetrofitClient {
         .build()
 
     val musicApiService: MusicApiService = retrofit.create(MusicApiService::class.java)
+
+    val telemetryApiService: TelemetryApiService by lazy {
+    retrofit.create(TelemetryApiService::class.java)
+}
 }
