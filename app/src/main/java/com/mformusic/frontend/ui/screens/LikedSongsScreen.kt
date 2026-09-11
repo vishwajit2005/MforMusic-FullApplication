@@ -10,6 +10,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.DragHandle
@@ -33,7 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil.compose.AsyncImage
+import com.mformusic.frontend.ui.components.AlbumArtwork
 import kotlin.math.abs
 import com.mformusic.frontend.model.SongResponse
 import com.mformusic.frontend.ui.components.ShimmerSongRow
@@ -74,7 +76,7 @@ fun LikedSongsScreen(
                 title = { Text("Liked Songs", fontWeight = FontWeight.Bold, color = TextPrimary) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = TextPrimary)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextPrimary)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -149,7 +151,7 @@ fun LikedSongsScreen(
                             modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
                         )
                     }
-                    itemsIndexed(likedSongs, key = { _, song -> song.externalTrackId }) { index, song ->
+                    itemsIndexed(likedSongs, key = { index, song -> "${song.externalTrackId}_$index" }) { index, song ->
                         val isDragged = draggedIndex == index
                         val elevation by animateDpAsState(if (isDragged) 8.dp else 0.dp, label = "elevation")
 
@@ -194,20 +196,16 @@ fun PlaylistHeader(songCount: Int) {
             Box(
                 modifier = Modifier
                     .size(120.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(16.dp))
                     .background(
                         Brush.linearGradient(
-                            listOf(Color(0xFF450E4B), Color(0xFFC42D69), Color(0xFFE8D093))
+                            listOf(GradientTop, AccentDark, AccentLight)
                         )
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                AsyncImage(
-                    model = "https://misc.scdn.co/abab43419590204d3d330d7c8be0a55a6157a090.jpg",
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
+                Icon(Icons.Default.Favorite, contentDescription = null,
+                    tint = TextPrimary, modifier = Modifier.size(48.dp))
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column {
@@ -252,8 +250,8 @@ fun LikedSongRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(elevation, RoundedCornerShape(8.dp))
-            .clip(RoundedCornerShape(8.dp))
+            .shadow(elevation, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp))
             .background(if (isDragged) DarkCardElevated else Color.Transparent)
             .clickable { onClick() }
             .padding(vertical = 8.dp, horizontal = 4.dp)
@@ -261,28 +259,7 @@ fun LikedSongRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Album Art
-        Box(
-            modifier = Modifier
-                .size(56.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(DarkCard)
-        ) {
-            if (!song.thumbnailUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = song.thumbnailUrl,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Icon(
-                    Icons.Default.MusicNote,
-                    contentDescription = null,
-                    tint = TextSecondary,
-                    modifier = Modifier.align(Alignment.Center)
-                )
-            }
-        }
+        AlbumArtwork(song.thumbnailUrl, Modifier.size(64.dp))
         Spacer(modifier = Modifier.width(14.dp))
 
         // Title + Artist
@@ -307,7 +284,7 @@ fun LikedSongRow(
         // Remove button
         IconButton(
             onClick = onRemove,
-            modifier = Modifier.size(36.dp)
+            modifier = Modifier.size(48.dp)
         ) {
             Icon(
                 Icons.Default.RemoveCircleOutline,

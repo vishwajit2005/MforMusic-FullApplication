@@ -25,7 +25,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY app/ app/
 
 # Non-root user
-RUN useradd -m -u 1001 mlops
+RUN useradd -m -u 1001 mlops && chown -R mlops:mlops /app && chmod -R a+rX /app
 USER mlops
 
 # sentence-transformers model cache — downloaded on first request if not pre-baked

@@ -1,6 +1,11 @@
 package com.mformusic.frontend.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.style.TextOverflow
+import com.mformusic.frontend.ui.components.AlbumArtwork
+import com.mformusic.frontend.ui.components.PlaybackButton
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,25 +47,29 @@ fun FullPlayerScreen(
     val isShuffleOn by playerViewModel.isShuffleOn.collectAsStateWithLifecycle()
     val repeatMode by playerViewModel.repeatMode.collectAsStateWithLifecycle()
 
+    var showMenu by remember { mutableStateOf(false) }
     val progress = if (duration > 0) position.toFloat() / duration.toFloat() else 0f
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
                     listOf(
-                        Color(0xFF2A3A2E),
+                        GradientTop,
                         DarkBackground,
                         DarkBackground
                     )
                 )
             )
     ) {
+        val artworkSize = (maxHeight - 490.dp).coerceIn(160.dp, 380.dp)
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 32.dp),
+                .systemBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Drag handle
@@ -91,39 +100,28 @@ fun FullPlayerScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("NOW PLAYING", fontSize = 11.sp, color = TextSecondary, letterSpacing = 2.sp)
                 }
-                IconButton(onClick = { /* TODO: add to queue */ }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "More", tint = TextPrimary)
+                Box {
+                    IconButton(onClick = { showMenu = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Track options", tint = TextPrimary)
+                    }
+                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        DropdownMenuItem(text = { Text(if (currentTrack?.liked == true) "Remove from liked songs" else "Like song") },
+                            enabled = currentTrack?.id != null,
+                            onClick = { showMenu = false; playerViewModel.toggleLike() })
+                        DropdownMenuItem(text = { Text(if (isDownloaded) "Remove download" else "Download song") },
+                            enabled = currentTrack != null && !isDownloading,
+                            onClick = { showMenu = false; playerViewModel.toggleDownload() })
+                        DropdownMenuItem(text = { Text("Close player") },
+                            onClick = { showMenu = false; onDismiss() })
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
-            // Album Art
-            Box(
-                modifier = Modifier
-                    .size(300.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(DarkCard),
-                contentAlignment = Alignment.Center
-            ) {
-                if (albumArt != null) {
-                    AsyncImage(
-                        model = albumArt,
-                        contentDescription = "Album Art",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Icon(
-                        Icons.Default.MusicNote,
-                        contentDescription = null,
-                        tint = TextSecondary,
-                        modifier = Modifier.size(80.dp)
-                    )
-                }
-            }
+            AlbumArtwork(albumArt, Modifier.size(artworkSize))
 
-            Spacer(modifier = Modifier.height(40.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Song Info
             Row(
@@ -137,13 +135,15 @@ fun FullPlayerScreen(
                         fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = artist ?: "Unknown Artist",
                         fontSize = 16.sp,
                         color = TextSecondary,
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 Row(
@@ -151,13 +151,13 @@ fun FullPlayerScreen(
                 ) {
                     IconButton(
                         onClick = { playerViewModel.toggleDownload() },
-                        enabled = currentTrack != null
+                        enabled = currentTrack != null && !isDownloading
                     ) {
                         when {
                             isDownloading -> {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(24.dp),
-                                    color = SpotifyGreen,
+                                    color = Accent,
                                     strokeWidth = 2.dp
                                 )
                             }
@@ -165,7 +165,7 @@ fun FullPlayerScreen(
                                 Icon(
                                     imageVector = Icons.Default.CheckCircle,
                                     contentDescription = "Downloaded",
-                                    tint = SpotifyGreen,
+                                    tint = Accent,
                                     modifier = Modifier.size(28.dp)
                                 )
                             }
@@ -182,23 +182,24 @@ fun FullPlayerScreen(
 
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    IconButton(onClick = { playerViewModel.toggleLike() }) {
+                    IconButton(onClick = { playerViewModel.toggleLike() }, enabled = currentTrack?.id != null) {
                         val isLiked = currentTrack?.liked == true
                         Icon(
                             imageVector = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                             contentDescription = if (isLiked) "Unlike" else "Like",
-                            tint = if (isLiked) SpotifyGreen else TextSecondary,
+                            tint = if (isLiked) Accent else TextSecondary,
                             modifier = Modifier.size(28.dp)
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Seek Bar
             Slider(
-                value = progress,
+                value = progress.coerceIn(0f, 1f),
+                enabled = duration > 0,
                 onValueChange = { newVal ->
                     if (duration > 0) {
                         playerViewModel.seekTo((newVal * duration).toLong())
@@ -207,7 +208,7 @@ fun FullPlayerScreen(
                 modifier = Modifier.fillMaxWidth(),
                 colors = SliderDefaults.colors(
                     thumbColor = TextPrimary,
-                    activeTrackColor = SpotifyGreen,
+                    activeTrackColor = Accent,
                     inactiveTrackColor = DarkCardElevated
                 )
             )
@@ -220,7 +221,7 @@ fun FullPlayerScreen(
                 Text(formatTime(duration), fontSize = 12.sp, color = TextSecondary)
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Playback Controls
             Row(
@@ -235,52 +236,16 @@ fun FullPlayerScreen(
                 ) {
                     Icon(
                         Icons.Default.Shuffle,
-                        contentDescription = "Shuffle",
-                        tint = if (isShuffleOn) SpotifyGreen else TextSecondary
+                        contentDescription = if (isShuffleOn) "Turn shuffle off" else "Turn shuffle on",
+                        tint = if (isShuffleOn) Accent else TextSecondary
                     )
                 }
 
-                // Skip Previous
-                IconButton(
-                    onClick = { playerViewModel.skipToPrevious() },
-                    modifier = Modifier.size(56.dp)
-                ) {
-                    Icon(
-                        Icons.Default.SkipPrevious,
-                        contentDescription = "Previous",
-                        tint = TextPrimary,
-                        modifier = Modifier.size(40.dp)
-                    )
-                }
-
-                // Play/Pause — large button
-                IconButton(
-                    onClick = { playerViewModel.togglePlayPause() },
-                    modifier = Modifier
-                        .size(72.dp)
-                        .clip(CircleShape)
-                        .background(SpotifyGreen)
-                ) {
-                    Icon(
-                        if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (isPlaying) "Pause" else "Play",
-                        tint = Color.Black,
-                        modifier = Modifier.size(40.dp)
-                    )
-                }
-
-                // Skip Next
-                IconButton(
-                    onClick = { playerViewModel.skipToNext() },
-                    modifier = Modifier.size(56.dp)
-                ) {
-                    Icon(
-                        Icons.Default.SkipNext,
-                        contentDescription = "Next",
-                        tint = TextPrimary,
-                        modifier = Modifier.size(40.dp)
-                    )
-                }
+                PlaybackButton(Icons.Default.SkipPrevious, "Previous", { playerViewModel.skipToPrevious() })
+                PlaybackButton(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    if (isPlaying) "Pause" else "Play", { playerViewModel.togglePlayPause() },
+                    prominent = true, size = 72.dp)
+                PlaybackButton(Icons.Default.SkipNext, "Next", { playerViewModel.skipToNext() })
 
                 // Repeat (cycles OFF → ALL → ONE)
                 IconButton(
@@ -296,18 +261,18 @@ fun FullPlayerScreen(
                         PlayerManager.RepeatMode.ALL -> Icon(
                             Icons.Default.Repeat,
                             contentDescription = "Repeat All",
-                            tint = SpotifyGreen
+                            tint = Accent
                         )
                         PlayerManager.RepeatMode.ONE -> Icon(
                             Icons.Default.RepeatOne,
                             contentDescription = "Repeat One",
-                            tint = SpotifyGreen
+                            tint = Accent
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(20.dp))
         }
     }
 }

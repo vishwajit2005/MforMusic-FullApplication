@@ -29,3 +29,9 @@ build_output.txt
 
 # Backend environment configuration
 backend/src/main/resources/application-local.properties
+
+# Local database connection credentials
+/.docker-host.env
+/backend/.env
+/mlops/.env
+/.env

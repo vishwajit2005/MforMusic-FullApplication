@@ -1,6 +1,13 @@
 package com.mformusic.frontend.ui.screens
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -9,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -46,32 +54,22 @@ import java.util.Calendar
 import kotlinx.coroutines.launch
 
 @Composable
-fun MainAppScreen(tokenDataStore: TokenDataStore) {
+fun MainAppScreen(tokenDataStore: TokenDataStore, onLogout: () -> Unit) {
     val navController = rememberNavController()
     val playerViewModel: PlayerViewModel = viewModel()
 
     val currentTrackTitle by playerViewModel.currentTrackTitle.collectAsStateWithLifecycle()
     val isPlaying by playerViewModel.isPlaying.collectAsStateWithLifecycle()
+    val artist by playerViewModel.currentArtistName.collectAsStateWithLifecycle()
     val albumArt by playerViewModel.currentAlbumArt.collectAsStateWithLifecycle()
     val position by playerViewModel.currentPosition.collectAsStateWithLifecycle()
     val duration by playerViewModel.duration.collectAsStateWithLifecycle()
 
-    var showFullPlayer by remember { mutableStateOf(false) }
+    var showFullPlayer by rememberSaveable { mutableStateOf(false) }
 
-    // Full Player overlay
-    AnimatedVisibility(
-        visible = showFullPlayer,
-        enter = slideInVertically(initialOffsetY = { it }),
-        exit = slideOutVertically(targetOffsetY = { it })
-    ) {
-        FullPlayerScreen(
-            playerViewModel = playerViewModel,
-            onDismiss = { showFullPlayer = false }
-        )
-    }
-
-    if (!showFullPlayer) {
+    Box(Modifier.fillMaxSize()) {
         Scaffold(
+            modifier = if (showFullPlayer) Modifier.clearAndSetSemantics { } else Modifier,
             bottomBar = {
                 Column(modifier = Modifier.background(Color.Transparent)) {
                     // Mini Player
@@ -79,6 +77,9 @@ fun MainAppScreen(tokenDataStore: TokenDataStore) {
                         MiniPlayer(
                             title = currentTrackTitle ?: "",
                             albumArt = albumArt,
+                            artist = artist,
+                            onPrevious = { playerViewModel.skipToPrevious() },
+                            onNext = { playerViewModel.skipToNext() },
                             isPlaying = isPlaying,
                             progress = if (duration > 0) position.toFloat() / duration.toFloat() else 0f,
                             onTogglePlay = { playerViewModel.togglePlayPause() },
@@ -96,15 +97,15 @@ fun MainAppScreen(tokenDataStore: TokenDataStore) {
 
                         bottomNavItems.forEach { screen ->
                             NavigationBarItem(
-                                icon = { Icon(screen.icon!!, contentDescription = screen.title) },
+                                icon = { Icon(screen.icon!!, contentDescription = null, modifier = Modifier.size(24.dp)) },
                                 label = { Text(screen.title, fontSize = 11.sp) },
                                 selected = currentRoute == screen.route,
                                 colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = SpotifyGreen,
-                                    selectedTextColor = SpotifyGreen,
+                                    selectedIconColor = Accent,
+                                    selectedTextColor = Accent,
                                     unselectedIconColor = TextSecondary,
                                     unselectedTextColor = TextSecondary,
-                                    indicatorColor = DarkCard
+                                    indicatorColor = Accent.copy(alpha = 0.14f)
                                 ),
                                 onClick = {
                                     if (currentRoute != screen.route) {
@@ -127,10 +128,15 @@ fun MainAppScreen(tokenDataStore: TokenDataStore) {
             NavHost(
                 navController = navController,
                 startDestination = Screen.Home.route,
-                modifier = Modifier.padding(innerPadding)
+                modifier = Modifier.padding(innerPadding),
+                enterTransition = { fadeIn(tween(240)) + slideInHorizontally(tween(240)) { it / 18 } },
+                exitTransition = { fadeOut(tween(160)) },
+                popEnterTransition = { fadeIn(tween(240)) },
+                popExitTransition = { fadeOut(tween(160)) }
             ) {
                 composable(Screen.Home.route) {
                     HomeScreen(
+                        onExploreClick = { navController.navigate(Screen.Search.route) },
                         onLikedSongsClick = {
                             navController.navigate(Screen.LikedSongs.route)
                         },
@@ -140,7 +146,7 @@ fun MainAppScreen(tokenDataStore: TokenDataStore) {
                     )
                 }
                 composable(Screen.Search.route) { SearchScreen() }
-                composable(Screen.ForYou.route) { ForYouScreen() }
+                composable(Screen.ForYou.route) { ForYouScreen(onExplore = { navController.navigate(Screen.Search.route) }, playerViewModel = playerViewModel) }
                 composable(Screen.LikedSongs.route) {
                     LikedSongsScreen(
                         onBackClick = { navController.popBackStack() }
@@ -154,90 +160,56 @@ fun MainAppScreen(tokenDataStore: TokenDataStore) {
                 composable(Screen.Profile.route) {
                     ProfileScreen(
                         tokenDataStore = tokenDataStore,
-                        onLogout = {
-                            navController.navigate(Screen.Login.route) {
-                                popUpTo(0) { inclusive = true }
-                            }
-                        }
+                        onLikedSongsClick = { navController.navigate(Screen.LikedSongs.route) },
+                        onDownloadedSongsClick = { navController.navigate(Screen.DownloadedSongs.route) },
+                        onExploreClick = { navController.navigate(Screen.Search.route) },
+                        onLogout = onLogout
                     )
                 }
             }
         }
+        AnimatedVisibility(
+            visible = showFullPlayer,
+            enter = slideInVertically(tween(320)) { it } + fadeIn(tween(220)),
+            exit = slideOutVertically(tween(280)) { it } + fadeOut(tween(200))
+        ) {
+            Surface(Modifier.fillMaxSize(), color = DarkBackground) {
+                FullPlayerScreen(playerViewModel = playerViewModel, onDismiss = { showFullPlayer = false })
+            }
+        }
+        BackHandler(enabled = showFullPlayer) { showFullPlayer = false }
     }
 }
 
 // ── Mini Player ───────────────────────────────────────────────────────────────
 @Composable
 fun MiniPlayer(
-    title: String,
-    albumArt: String?,
-    isPlaying: Boolean,
-    progress: Float,
-    onTogglePlay: () -> Unit,
-    onExpand: () -> Unit
+    title: String, albumArt: String?, artist: String?, isPlaying: Boolean, progress: Float,
+    onTogglePlay: () -> Unit, onPrevious: () -> Unit, onNext: () -> Unit, onExpand: () -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onExpand() }
-    ) {
-        // Thin progress bar
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(2.dp),
-            color = SpotifyGreen,
-            trackColor = DarkCardElevated
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(DarkCard)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Album Art
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(DarkCardElevated),
-                contentAlignment = Alignment.Center
-            ) {
-                if (albumArt != null) {
-                    AsyncImage(
-                        model = albumArt,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Icon(Icons.Default.MusicNote, contentDescription = null, tint = TextSecondary)
+    Surface(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(18.dp), color = DarkCardElevated, shadowElevation = 12.dp) {
+        Column {
+            Row(Modifier.fillMaxWidth().padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
+                    .clickable(onClickLabel = "Open player", onClick = onExpand).padding(4.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    AlbumArtwork(albumArt, Modifier.size(48.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(title, style = MaterialTheme.typography.titleSmall, color = TextPrimary,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(artist ?: "Now playing", style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
+                PlaybackButton(Icons.Default.SkipPrevious, "Previous", onPrevious)
+                PlaybackButton(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    if (isPlaying) "Pause" else "Play", onTogglePlay, prominent = true)
+                PlaybackButton(Icons.Default.SkipNext, "Next", onNext)
             }
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Title
-            Text(
-                title,
-                color = TextPrimary,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-
-            // Play/Pause
-            IconButton(onClick = onTogglePlay) {
-                Icon(
-                    if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (isPlaying) "Pause" else "Play",
-                    tint = TextPrimary,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
+            LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(3.dp), color = Accent, trackColor = DarkCard)
         }
     }
 }
@@ -247,6 +219,7 @@ fun MiniPlayer(
 fun HomeScreen(
     onLikedSongsClick: () -> Unit,
     onDownloadedSongsClick: () -> Unit,
+    onExploreClick: () -> Unit,
     homeViewModel: HomeViewModel = viewModel()
 ) {
     val recentSongs by homeViewModel.recentSongs.collectAsStateWithLifecycle()
@@ -287,7 +260,7 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(24.dp))
                 Text(
                     dynamicGreeting(),
-                    fontSize = 24.sp,
+                    fontSize = 32.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = TextPrimary
                 )
@@ -295,7 +268,7 @@ fun HomeScreen(
 
             item {
                 Text(
-                    "Your Playlists",
+                    "Your collection",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
@@ -309,14 +282,14 @@ fun HomeScreen(
                         Box(modifier = Modifier.weight(1f)) {
                             PlaylistItem(
                                 name = "Liked Songs",
-                                imgUrl = "https://misc.scdn.co/abab43419590204d3d330d7c8be0a55a6157a090.jpg",
+                                icon = Icons.Default.Favorite,
                                 onClick = onLikedSongsClick
                             )
                         }
                         Box(modifier = Modifier.weight(1f)) {
                             PlaylistItem(
                                 name = "Downloaded",
-                                imgUrl = "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=300&auto=format&fit=crop",
+                                icon = Icons.Default.Download,
                                 onClick = onDownloadedSongsClick
                             )
                         }
@@ -327,8 +300,9 @@ fun HomeScreen(
                     ) {
                         Box(modifier = Modifier.weight(1f)) {
                             PlaylistItem(
-                                "Chill Vibes",
-                                "https://i1.sndcdn.com/artworks-000455431671-5olr7m-t500x500.jpg"
+                                name = "Explore music",
+                                icon = Icons.Default.Search,
+                                onClick = onExploreClick
                             )
                         }
                         Box(modifier = Modifier.weight(1f)) {}
@@ -367,11 +341,12 @@ fun HomeScreen(
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    "No recent songs yet.\nStart exploring music!",
+                                    "Your listening history starts here.",
                                     fontSize = 14.sp,
                                     color = TextMuted,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                 )
+                                TextButton(onClick = onExploreClick) { Text("Explore music") }
                             }
                         }
                     }
@@ -404,7 +379,7 @@ fun SearchScreen(searchViewModel: SearchViewModel = viewModel()) {
     val error by searchViewModel.error.collectAsStateWithLifecycle()
     val focusManager = LocalFocusManager.current
     val snackbarHostState = remember { SnackbarHostState() }
-    var inputText by remember { mutableStateOf("") }
+    var inputText by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(error) {
         error?.let {
@@ -439,7 +414,7 @@ fun SearchScreen(searchViewModel: SearchViewModel = viewModel()) {
                     inputText = it
                     searchViewModel.updateQuery(it)
                 },
-                placeholder = { Text("Songs, artists, albums...", color = TextSecondary) },
+                placeholder = { Text("Find songs and artists", color = TextSecondary) },
                 leadingIcon = {
                     Icon(Icons.Default.Search, contentDescription = null, tint = TextSecondary)
                 },
@@ -464,7 +439,7 @@ fun SearchScreen(searchViewModel: SearchViewModel = viewModel()) {
                     unfocusedTextColor = TextPrimary,
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent,
-                    cursorColor = SpotifyGreen
+                    cursorColor = Accent
                 ),
                 singleLine = true
             )
@@ -525,7 +500,10 @@ fun SearchScreen(searchViewModel: SearchViewModel = viewModel()) {
 @Composable
 fun ProfileScreen(
     tokenDataStore: TokenDataStore,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    onLikedSongsClick: () -> Unit,
+    onDownloadedSongsClick: () -> Unit,
+    onExploreClick: () -> Unit
 ) {
     val username by tokenDataStore.usernameFlow.collectAsState(initial = "")
     val email by tokenDataStore.emailFlow.collectAsState(initial = "")
@@ -541,6 +519,7 @@ fun ProfileScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -551,7 +530,7 @@ fun ProfileScreen(
                 modifier = Modifier
                     .size(110.dp)
                     .clip(CircleShape)
-                    .background(SpotifyGreen),
+                    .background(Accent),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -578,20 +557,20 @@ fun ProfileScreen(
             )
 
             Spacer(modifier = Modifier.height(40.dp))
-            Divider(color = DarkCard)
+            HorizontalDivider(color = DarkCard)
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Stats row
+            // Library shortcuts
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                StatItem("🎵", "Your Music")
-                StatItem("❤️", "Liked Songs")
-                StatItem("🎧", "Playlists")
+                StatItem(Icons.Default.Search, "Explore", onExploreClick)
+                StatItem(Icons.Default.Favorite, "Liked Songs", onLikedSongsClick)
+                StatItem(Icons.Default.Download, "Downloads", onDownloadedSongsClick)
             }
 
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.height(48.dp))
 
             // Logout button
             OutlinedButton(
@@ -608,7 +587,7 @@ fun ProfileScreen(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed),
                 border = androidx.compose.foundation.BorderStroke(1.dp, ErrorRed)
             ) {
-                Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(20.dp))
+                Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Log Out", fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
@@ -620,40 +599,22 @@ fun ProfileScreen(
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 @Composable
-fun StatItem(emoji: String, label: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(emoji, fontSize = 28.sp)
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(label, fontSize = 11.sp, color = TextSecondary)
+fun StatItem(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Column(Modifier.clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(icon, null, tint = Accent, modifier = Modifier.size(28.dp))
+        Spacer(Modifier.height(8.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
     }
 }
 
 @Composable
-fun PlaylistItem(name: String, imgUrl: String, onClick: () -> Unit = {}) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(56.dp)
-            .clip(RoundedCornerShape(4.dp))
-            .background(DarkCard)
-            .clickable { onClick() },
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        AsyncImage(
-            model = imgUrl,
-            contentDescription = null,
-            modifier = Modifier.size(56.dp),
-            contentScale = ContentScale.Crop
-        )
-        Text(
-            text = name,
-            color = TextPrimary,
-            modifier = Modifier.padding(horizontal = 12.dp),
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            fontSize = 14.sp,
-            overflow = TextOverflow.Ellipsis
-        )
+fun PlaylistItem(name: String, icon: ImageVector, onClick: () -> Unit) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(DarkCard)
+        .clickable(onClick = onClick).padding(16.dp)) {
+        Icon(icon, null, tint = Accent, modifier = Modifier.size(32.dp))
+        Spacer(Modifier.height(20.dp))
+        Text(name, color = TextPrimary, style = MaterialTheme.typography.titleSmall)
     }
 }
 
@@ -661,31 +622,10 @@ fun PlaylistItem(name: String, imgUrl: String, onClick: () -> Unit = {}) {
 fun TrendingSongCard(title: String, artist: String, imageUrl: String, onClick: () -> Unit) {
     Column(
         modifier = Modifier
-            .width(150.dp)
+            .width(176.dp).clip(RoundedCornerShape(16.dp))
             .clickable { onClick() }
     ) {
-        Box(
-            modifier = Modifier
-                .size(150.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(DarkCard)
-        ) {
-            if (imageUrl.isNotBlank()) {
-                AsyncImage(
-                    model = imageUrl,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Icon(
-                    Icons.Default.MusicNote,
-                    contentDescription = null,
-                    tint = TextSecondary,
-                    modifier = Modifier.align(Alignment.Center)
-                )
-            }
-        }
+        AlbumArtwork(imageUrl, Modifier.size(176.dp))
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             title,
@@ -715,28 +655,7 @@ fun SearchResultRow(song: SongResponse, onClick: () -> Unit) {
             .padding(vertical = 8.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(56.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(DarkCard)
-        ) {
-            if (!song.thumbnailUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = song.thumbnailUrl,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Icon(
-                    Icons.Default.MusicNote,
-                    contentDescription = null,
-                    tint = TextSecondary,
-                    modifier = Modifier.align(Alignment.Center)
-                )
-            }
-        }
+        AlbumArtwork(song.thumbnailUrl, Modifier.size(64.dp))
         Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -757,7 +676,7 @@ fun SearchResultRow(song: SongResponse, onClick: () -> Unit) {
         }
         Icon(
             Icons.Default.PlayArrow,
-            contentDescription = "Play",
+            contentDescription = null,
             tint = TextMuted,
             modifier = Modifier.size(20.dp)
         )
@@ -766,9 +685,9 @@ fun SearchResultRow(song: SongResponse, onClick: () -> Unit) {
 
 private fun dynamicGreeting(): String {
     return when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
-        in 5..11 -> "Good morning 🌅"
-        in 12..17 -> "Good afternoon ☀️"
-        in 18..21 -> "Good evening 🌇"
-        else -> "Good night 🌙"
+        in 5..11 -> "Good morning"
+        in 12..17 -> "Good afternoon"
+        in 18..21 -> "Good evening"
+        else -> "Late night listening"
     }
 }

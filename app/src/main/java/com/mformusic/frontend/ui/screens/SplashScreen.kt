@@ -15,7 +15,7 @@ import com.mformusic.frontend.data.TokenDataStore
 import com.mformusic.frontend.navigation.Screen
 import com.mformusic.frontend.ui.theme.DarkBackground
 import com.mformusic.frontend.ui.theme.GradientTop
-import com.mformusic.frontend.ui.theme.SpotifyGreen
+import com.mformusic.frontend.ui.theme.Accent
 import kotlinx.coroutines.delay
 
 @Composable
@@ -44,7 +44,7 @@ fun SplashScreen(navController: NavController, tokenDataStore: TokenDataStore) {
                 "M",
                 fontSize = 80.sp,
                 fontWeight = FontWeight.ExtraBold,
-                color = SpotifyGreen
+                color = Accent
             )
             Text(
                 "for Music",

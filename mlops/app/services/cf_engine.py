@@ -180,12 +180,12 @@ class CollaborativeFilterEngine:
                 return []
 
             results = []
-            for rank, (item_idx, score) in enumerate(
-                zip(item_ids.tolist(), scores.tolist()), start=1
-            ):
+            seen_song_ids = set()
+            for item_idx, score in zip(item_ids.tolist(), scores.tolist()):
                 song_id = self._rev_item_index.get(int(item_idx))
-                if song_id:
-                    results.append({"song_id": song_id, "score": round(float(score), 6), "rank": rank})
+                if song_id and song_id not in seen_song_ids:
+                    seen_song_ids.add(song_id)
+                    results.append({"song_id": song_id, "score": round(float(score), 6), "rank": len(results) + 1})
 
             return results
 

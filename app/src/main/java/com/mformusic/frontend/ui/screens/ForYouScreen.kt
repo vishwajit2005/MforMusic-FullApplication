@@ -4,6 +4,13 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import com.mformusic.frontend.ui.components.AlbumArtwork
+import com.mformusic.frontend.viewmodel.PlayerViewModel
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -36,8 +43,12 @@ import com.mformusic.frontend.viewmodel.ForYouViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ForYouScreen(
-    forYouViewModel: ForYouViewModel = viewModel()
+    onExplore: () -> Unit,
+    forYouViewModel: ForYouViewModel = viewModel(),
+    playerViewModel: PlayerViewModel = viewModel()
 ) {
+    val currentTrack by playerViewModel.currentTrack.collectAsStateWithLifecycle()
+    val isPlaying by playerViewModel.isPlaying.collectAsStateWithLifecycle()
     val uiState by forYouViewModel.uiState.collectAsStateWithLifecycle()
     val isRefreshing by forYouViewModel.isRefreshing.collectAsStateWithLifecycle()
 
@@ -46,14 +57,16 @@ fun ForYouScreen(
         onRefresh = { forYouViewModel.fetchRecommendations() },
         modifier = Modifier.fillMaxSize()
     ) {
+        AnimatedContent(targetState = uiState, contentKey = { it::class }, label = "feed_state",
+            transitionSpec = { fadeIn(tween(240)) togetherWith fadeOut(tween(120)) }) { displayedState ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.0f to Color(0xFF0D1B2A),
-                            0.35f to Color(0xFF1A1A2E),
+                            0.0f to GradientTop,
+                            0.35f to GradientMid,
                             1.0f to DarkBackground
                         )
                     )
@@ -66,10 +79,14 @@ fun ForYouScreen(
             }
 
             // ── Content ──────────────────────────────────────────────────────────
-            when (val state = uiState) {
+            when (val state = displayedState) {
                 is ForYouUiState.Loading -> {
-                    items(8) {
-                        ShimmerSongRow()
+                    item {
+                        Text("Finding your next favourite…", color = TextSecondary,
+                            modifier = Modifier.padding(20.dp).semantics { liveRegion = LiveRegionMode.Polite })
+                    }
+                    items(6) {
+                        Box(Modifier.padding(horizontal = 20.dp)) { ShimmerSongRow() }
                     }
                 }
 
@@ -84,7 +101,7 @@ fun ForYouScreen(
 
                 is ForYouUiState.Success -> {
                     if (state.songs.isEmpty()) {
-                        item { ForYouColdStartState() }
+                        item { ForYouColdStartState(onExplore) }
                     } else {
                         // Source badge
                         item {
@@ -95,10 +112,12 @@ fun ForYouScreen(
                                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
                             )
                         }
-                        itemsIndexed(state.songs) { index, song ->
+                        itemsIndexed(state.songs, key = { index, song -> "${song.externalTrackId}_$index" }) { index, song ->
                             ForYouSongRow(
                                 song = song,
                                 rank = index + 1,
+                                isCurrent = currentTrack?.externalTrackId == song.externalTrackId,
+                                isPlaying = isPlaying,
                                 onClick = { forYouViewModel.playSong(song) }
                             )
                         }
@@ -106,6 +125,7 @@ fun ForYouScreen(
                     }
                 }
             }
+        }
         }
     }
 }
@@ -131,7 +151,7 @@ private fun ForYouHeroHeader() {
             .height(200.dp)
             .background(
                 Brush.radialGradient(
-                    colors = listOf(Color(0xFF1DB954).copy(alpha = 0.25f), Color.Transparent),
+                    colors = listOf(Accent.copy(alpha = 0.16f), Color.Transparent),
                     radius = 600f
                 )
             ),
@@ -141,7 +161,7 @@ private fun ForYouHeroHeader() {
             Icon(
                 imageVector = Icons.Default.AutoAwesome,
                 contentDescription = null,
-                tint = SpotifyGreen,
+                tint = Accent,
                 modifier = Modifier
                     .size(48.dp)
                     .scale(iconScale)
@@ -168,11 +188,15 @@ private fun ForYouHeroHeader() {
 private fun ForYouSongRow(
     song: SongResponse,
     rank: Int,
+    isCurrent: Boolean,
+    isPlaying: Boolean,
     onClick: () -> Unit
 ) {
-    var isPressed by remember { mutableStateOf(false) }
+    val interaction = remember { MutableInteractionSource() }
+    val isPressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (isPressed) 0.98f else 1f, label = "recommendation_press")
     val bgColor by animateColorAsState(
-        targetValue = if (isPressed) DarkCardElevated else Color.Transparent,
+        targetValue = if (isPressed) DarkCardElevated else if (isCurrent) Accent.copy(alpha = 0.12f) else DarkSurface,
         animationSpec = tween(100),
         label = "row_bg"
     )
@@ -180,18 +204,19 @@ private fun ForYouSongRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .scale(scale)
+            .clip(RoundedCornerShape(18.dp))
             .background(bgColor)
-            .clickable {
-                isPressed = true
-                onClick()
-            }
-            .padding(horizontal = 20.dp, vertical = 10.dp),
+            .clickable(interactionSource = interaction, indication = ripple(),
+                onClickLabel = "Play ${song.title}", onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Rank number
         Text(
             text = rank.toString().padStart(2, '0'),
-            color = if (rank <= 3) SpotifyGreen else TextMuted,
+            color = if (rank <= 3) Accent else TextMuted,
             fontSize = 13.sp,
             fontWeight = if (rank <= 3) FontWeight.Bold else FontWeight.Normal,
             modifier = Modifier.width(28.dp)
@@ -199,25 +224,7 @@ private fun ForYouSongRow(
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        // Album art
-        Box(
-            modifier = Modifier
-                .size(52.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(DarkCard),
-            contentAlignment = Alignment.Center
-        ) {
-            if (!song.thumbnailUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = song.thumbnailUrl,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Icon(Icons.Default.MusicNote, contentDescription = null, tint = TextSecondary)
-            }
-        }
+        AlbumArtwork(song.thumbnailUrl, Modifier.size(64.dp))
 
         Spacer(modifier = Modifier.width(14.dp))
 
@@ -225,7 +232,7 @@ private fun ForYouSongRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = song.title,
-                color = TextPrimary,
+                color = if (isCurrent) Accent else TextPrimary,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 15.sp,
                 maxLines = 1,
@@ -245,7 +252,7 @@ private fun ForYouSongRow(
             Icon(
                 Icons.Default.Favorite,
                 contentDescription = "Liked",
-                tint = SpotifyGreen,
+                tint = Accent,
                 modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(8.dp))
@@ -253,36 +260,26 @@ private fun ForYouSongRow(
 
         // Play button
         Icon(
-            Icons.Default.PlayArrow,
-            contentDescription = "Play",
-            tint = TextMuted,
+            if (isCurrent && isPlaying) Icons.Default.GraphicEq else Icons.Default.PlayArrow,
+            contentDescription = if (isCurrent && isPlaying) "Now playing" else null,
+            tint = if (isCurrent) Accent else TextSecondary,
             modifier = Modifier.size(22.dp)
         )
     }
 
-    // Thin divider between rows
-    HorizontalDivider(
-        modifier = Modifier.padding(start = 72.dp, end = 20.dp),
-        thickness = 0.5.dp,
-        color = DarkCard
-    )
-
-    // Reset press state
-    LaunchedEffect(isPressed) {
-        if (isPressed) {
-            kotlinx.coroutines.delay(150)
-            isPressed = false
-        }
-    }
 }
 
 // ── Empty / Cold-start state ───────────────────────────────────────────────────
 @Composable
-private fun ForYouColdStartState() {
+private fun ForYouColdStartState(onExplore: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 32.dp, vertical = 48.dp),
+            .padding(20.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(DarkCard)
+            .padding(horizontal = 24.dp, vertical = 32.dp)
+            .animateContentSize(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Icon(
@@ -306,6 +303,12 @@ private fun ForYouColdStartState() {
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             lineHeight = 20.sp
         )
+        Spacer(Modifier.height(24.dp))
+        Button(onClick = onExplore, modifier = Modifier.heightIn(min = 48.dp)) {
+            Icon(Icons.Default.Search, null)
+            Spacer(Modifier.width(8.dp))
+            Text("Explore music")
+        }
     }
 }
 
@@ -315,7 +318,11 @@ private fun ForYouErrorState(message: String, onRetry: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 32.dp, vertical = 48.dp),
+            .padding(20.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(DarkCard)
+            .padding(horizontal = 24.dp, vertical = 32.dp)
+            .animateContentSize(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Icon(
@@ -325,13 +332,15 @@ private fun ForYouErrorState(message: String, onRetry: () -> Unit) {
             modifier = Modifier.size(48.dp)
         )
         Spacer(modifier = Modifier.height(16.dp))
-        Text(message, fontSize = 15.sp, color = TextSecondary,
+        Text("Let’s reconnect", style = MaterialTheme.typography.titleLarge, color = TextPrimary)
+        Spacer(Modifier.height(8.dp))
+        Text(message, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }, fontSize = 15.sp, color = TextSecondary,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         Spacer(modifier = Modifier.height(20.dp))
         OutlinedButton(
             onClick = onRetry,
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = SpotifyGreen),
-            border = androidx.compose.foundation.BorderStroke(1.dp, SpotifyGreen)
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Accent)
         ) {
             Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))

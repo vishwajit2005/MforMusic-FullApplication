@@ -92,8 +92,7 @@ public class AsyncUploadService {
             payload.put("audio_url", audioUrl);
             payload.put("title", song.getTitle());
             payload.put("artist_name", song.getArtistName());
-            payload.put("album", song.getAlbumName());
-            payload.put("language", song.getLanguage() != null ? song.getLanguage().toLowerCase() : "unknown");
+            payload.put("language", "unknown");
             payload.put("decade", "2020s");
 
             org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();

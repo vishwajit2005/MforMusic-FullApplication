@@ -99,7 +99,7 @@ fun LoginScreen(navController: NavController, tokenDataStore: TokenDataStore) {
                 Spacer(modifier = Modifier.height(60.dp))
 
                 // Logo
-                Text("M", fontSize = 64.sp, fontWeight = FontWeight.ExtraBold, color = SpotifyGreen)
+                Text("M", fontSize = 64.sp, fontWeight = FontWeight.ExtraBold, color = Accent)
                 Text("for Music", fontSize = 18.sp, color = TextSecondary, fontWeight = FontWeight.Medium)
 
                 Spacer(modifier = Modifier.height(48.dp))
@@ -176,8 +176,8 @@ fun LoginScreen(navController: NavController, tokenDataStore: TokenDataStore) {
                         .height(54.dp),
                     shape = RoundedCornerShape(27.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = SpotifyGreen,
-                        disabledContainerColor = SpotifyGreenDark
+                        containerColor = Accent,
+                        disabledContainerColor = AccentDark
                     )
                 ) {
                     if (uiState is AuthUiState.Loading) {
@@ -204,9 +204,9 @@ fun LoginScreen(navController: NavController, tokenDataStore: TokenDataStore) {
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Divider(modifier = Modifier.weight(1f), color = TextMuted)
+                    HorizontalDivider(modifier = Modifier.weight(1f), color = TextMuted)
                     Text("  OR  ", color = TextMuted, fontSize = 12.sp)
-                    Divider(modifier = Modifier.weight(1f), color = TextMuted)
+                    HorizontalDivider(modifier = Modifier.weight(1f), color = TextMuted)
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -237,11 +237,11 @@ fun LoginScreen(navController: NavController, tokenDataStore: TokenDataStore) {
 fun authTextFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedTextColor = TextPrimary,
     unfocusedTextColor = TextPrimary,
-    focusedBorderColor = SpotifyGreen,
+    focusedBorderColor = Accent,
     unfocusedBorderColor = DarkCardElevated,
-    focusedLabelColor = SpotifyGreen,
+    focusedLabelColor = Accent,
     unfocusedLabelColor = TextSecondary,
-    cursorColor = SpotifyGreen,
+    cursorColor = Accent,
     focusedContainerColor = DarkCard,
     unfocusedContainerColor = DarkCard
 )

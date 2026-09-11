@@ -93,7 +93,7 @@ fun RegisterScreen(navController: NavController, tokenDataStore: TokenDataStore)
                 Spacer(modifier = Modifier.height(60.dp))
 
                 // Logo
-                Text("M", fontSize = 64.sp, fontWeight = FontWeight.ExtraBold, color = SpotifyGreen)
+                Text("M", fontSize = 64.sp, fontWeight = FontWeight.ExtraBold, color = Accent)
                 Text("for Music", fontSize = 18.sp, color = TextSecondary, fontWeight = FontWeight.Medium)
 
                 Spacer(modifier = Modifier.height(48.dp))
@@ -192,8 +192,8 @@ fun RegisterScreen(navController: NavController, tokenDataStore: TokenDataStore)
                         .height(54.dp),
                     shape = RoundedCornerShape(27.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = SpotifyGreen,
-                        disabledContainerColor = SpotifyGreenDark
+                        containerColor = Accent,
+                        disabledContainerColor = AccentDark
                     )
                 ) {
                     if (uiState is AuthUiState.Loading) {

@@ -6,29 +6,20 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-// Set of Material typography styles to start with
+private fun musicText(size: Int, height: Int, weight: FontWeight = FontWeight.Normal) = TextStyle(
+    fontFamily = FontFamily.SansSerif, fontWeight = weight,
+    fontSize = size.sp, lineHeight = height.sp, letterSpacing = 0.sp
+)
 val Typography = Typography(
-    bodyLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-        lineHeight = 24.sp,
-        letterSpacing = 0.5.sp
-    )
-    /* Other default text styles to override
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = 0.sp
-    ),
-    labelSmall = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
-    )
-    */
+    displaySmall = musicText(36, 42, FontWeight.ExtraBold),
+    headlineLarge = musicText(32, 38, FontWeight.ExtraBold),
+    headlineMedium = musicText(28, 34, FontWeight.Bold),
+    headlineSmall = musicText(24, 30, FontWeight.Bold),
+    titleLarge = musicText(22, 28, FontWeight.Bold),
+    titleMedium = musicText(16, 22, FontWeight.SemiBold),
+    titleSmall = musicText(14, 20, FontWeight.SemiBold),
+    bodyLarge = musicText(16, 24), bodyMedium = musicText(14, 20),
+    bodySmall = musicText(12, 18), labelLarge = musicText(14, 20, FontWeight.Bold),
+    labelMedium = musicText(12, 16, FontWeight.SemiBold),
+    labelSmall = musicText(11, 16, FontWeight.Medium)
 )

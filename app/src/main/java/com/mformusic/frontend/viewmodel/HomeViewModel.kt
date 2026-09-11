@@ -34,7 +34,8 @@ class HomeViewModel : ViewModel() {
             try {
                 val response = api.getRecentSongs()
                 if (response.isSuccessful) {
-                    _recentSongs.value = response.body() ?: emptyList()
+                    val rawSongs = response.body() ?: emptyList()
+                    _recentSongs.value = rawSongs.distinctBy { it.externalTrackId ?: it.id.toString() }
                 } else {
                     _error.value = "Failed to load recent songs"
                 }

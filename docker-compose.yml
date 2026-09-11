@@ -1,25 +1,29 @@
-version: "3.9"
-
 # ─────────────────────────────────────────────────────────────────────────────
 # MforMusic — Local Full-Stack Development Environment
 #
 # Services:
-#   mysql       — Aiven MySQL mirror (local dev only)
-#   postgres    — pgvector PostgreSQL for MLOps embeddings
-#   zookeeper   — Kafka dependency
-#   kafka       — Event bus (Phase 9)
-#   backend     — Spring Boot (port 8080)
-#   mlops       — FastAPI recommendation engine (port 8000)
+#   mysql       — MySQL database (port 3306)
+#   postgres    — pgvector PostgreSQL for MLOps embeddings & telemetry (port 5432)
+#   zookeeper   — Kafka coordinator (port 2181)
+#   kafka       — Event bus for telemetry interactions (port 9092)
+#   backend     — Spring Boot REST API & Auth (port 8080)
+#   mlops       — FastAPI Recommendation Engine & SHAP API (port 8000)
+#   streamlit   — Streamlit Explainability & Telemetry UI (port 8501)
+#
+# Optional Monitoring (run with --profile monitoring or --profile all):
+#   prometheus  — Scrapes metrics from backend & mlops (port 9090)
+#   grafana     — Visualization dashboards (port 3000)
 #
 # Usage:
-#   docker compose up -d            # start all services
-#   docker compose up backend mlops # start just the apps
-#   docker compose logs -f backend  # tail logs
+#   docker compose up -d            # start all core services
+#   docker compose up -d --build    # rebuild and start all services
+#   docker compose logs -f          # tail logs for all services
+#   docker compose down             # stop all containers
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
 
-  # ── MySQL (local dev mirror) ───────────────────────────────────────────────
+  # ── MySQL ──────────────────────────────────────────────────────────────────
   mysql:
     image: mysql:8.0
     container_name: mformusic-mysql
@@ -39,7 +43,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── PostgreSQL + pgvector (MLOps embeddings) ───────────────────────────────
+  # ── PostgreSQL + pgvector (MLOps embeddings & telemetry) ───────────────────
   postgres:
     image: pgvector/pgvector:pg16
     container_name: mformusic-postgres
@@ -62,19 +66,27 @@ services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.0
     container_name: mformusic-zookeeper
+    restart: unless-stopped
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     volumes:
       - zookeeper_data:/var/lib/zookeeper/data
       - zookeeper_log:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 2181 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # ── Apache Kafka ───────────────────────────────────────────────────────────
   kafka:
     image: confluentinc/cp-kafka:7.6.0
     container_name: mformusic-kafka
+    restart: unless-stopped
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
       - "9092:9092"
     environment:
@@ -84,13 +96,17 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
     volumes:
       - kafka_data:/var/lib/kafka/data
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
-      interval: 15s
+      interval: 10s
       timeout: 10s
-      retries: 5
+      retries: 8
+      start_period: 60s
 
   # ── Spring Boot Backend ────────────────────────────────────────────────────
   backend:
@@ -112,17 +128,16 @@ services:
       DB_NAME: mformusic_db
       DB_USER: mformusic
       DB_PASSWORD: localdev
-      JWT_SECRET: ${JWT_SECRET}
-      SUPABASE_URL: ${SUPABASE_URL}
-      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      JWT_SECRET: ${JWT_SECRET:-MForMusicSuperSecretTokenKey2026!AppForStreamingAndCachingSystemByVishwajit}
+      SUPABASE_URL: ${SUPABASE_URL:-https://uiflilqgxskypojokyto.supabase.co}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpZmxpbHFneHNreXBvam9reXRvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzMzUzNDUsImV4cCI6MjA5NjkxMTM0NX0.oRmQhgmUbkPCRhkyOUEEVaH2ZQhkFxSqxyNK9gPft_A}
       SUPABASE_BUCKET: tracks
       MLOPS_FASTAPI_ENABLED: "true"
       MLOPS_FASTAPI_URL: http://mlops:8000
-      # Kafka (Phase 9)
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       KAFKA_TELEMETRY_ENABLED: "true"
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/actuator/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -144,18 +159,78 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql://mlops:mlops@postgres:5432/mlops_db
+      MYSQL_URL: mysql+pymysql://mformusic:localdev@mysql:3306/mformusic_db
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       KAFKA_TELEMETRY_TOPIC: mformusic.telemetry.interactions
       KAFKA_CONSUMER_GROUP: mlops-recommendation-engine
     volumes:
-      # Persist downloaded sentence-transformers model across restarts
       - mlops_model_cache:/app/.model_cache
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 90s  # sentence-transformers takes time on first start
+      start_period: 90s
+
+  # ── Streamlit Dashboard (Explainability & Telemetry UI) ─────────────────────
+  streamlit:
+    build:
+      context: ./mlops
+      dockerfile: Dockerfile
+    container_name: mformusic-streamlit
+    restart: unless-stopped
+    depends_on:
+      mlops:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    ports:
+      - "8501:8501"
+    environment:
+      EXPLAINABILITY_API_URL: http://mlops:8000/api/v1/explainability
+      BACKEND_TELEMETRY_URL: http://backend:8080/api/v1/telemetry/interactions
+    command: ["streamlit", "run", "app/explainability/dashboard/app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8501/_stcore/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ── Prometheus (Optional Monitoring) ───────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: mformusic-prometheus
+    restart: unless-stopped
+    profiles:
+      - monitoring
+      - all
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+
+  # ── Grafana (Optional Monitoring) ──────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: mformusic-grafana
+    restart: unless-stopped
+    profiles:
+      - monitoring
+      - all
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
 
 volumes:
   mysql_data:
@@ -164,3 +239,5 @@ volumes:
   zookeeper_log:
   kafka_data:
   mlops_model_cache:
+  prometheus_data:
+  grafana_data:

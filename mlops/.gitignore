@@ -7,3 +7,8 @@ __pycache__/
 dist/
 build/
 .pytest_cache/
+
+# Explainability pipeline — generated artifacts (large binary files)
+app/explainability/artifacts/*.joblib
+app/explainability/artifacts/*.json
+app/explainability/dataset/*.parquet

@@ -22,6 +22,8 @@ RUN ./mvnw package -DskipTests -q
 # ─────────────────────────────────────────────────────────────────────────────
 FROM eclipse-temurin:21-jre-alpine AS runtime
 
+RUN apk add --no-cache curl
+
 WORKDIR /app
 
 # Non-root user for security

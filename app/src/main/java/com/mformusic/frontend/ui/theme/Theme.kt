@@ -5,10 +5,10 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 
 private val MforMusicDarkColorScheme = darkColorScheme(
-    primary = SpotifyGreen,
-    onPrimary = TextPrimary,
+    primary = Accent,
+    onPrimary = DarkBackground,
     primaryContainer = DarkCard,
-    secondary = SpotifyGreenLight,
+    secondary = AccentLight,
     background = DarkBackground,
     surface = DarkSurface,
     surfaceVariant = DarkCard,

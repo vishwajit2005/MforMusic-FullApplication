@@ -9,10 +9,17 @@ Startup sequence:
   4. Start APScheduler for hourly periodic retraining
 
 Endpoints:
-  POST /api/v1/interactions/ingest      ← Spring Boot forwards telemetry here
-  GET  /api/v1/recommendations/{userId} ← Spring Boot proxies this to Android
+  POST /api/v1/interactions/ingest                         ← Spring Boot forwards telemetry here
+  GET  /api/v1/recommendations/{userId}                    ← Spring Boot proxies this to Android
   GET  /api/v1/recommendations/model/status
   POST /api/v1/recommendations/model/retrain
+  GET  /api/v1/content/queue-feature-extraction
+  POST /api/v1/content/model/retrain
+  GET  /api/v1/search/songs
+  GET  /api/v1/explainability/global-importance            ← Recommendation explainability (Phase 10)
+  GET  /api/v1/explainability/factors
+  GET  /api/v1/explainability/recommendation/{user_id}/{song_id}
+  GET  /api/v1/explainability/status
   GET  /health
 """
 
@@ -26,6 +33,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1 import interactions, recommendations
 from app.api.v1 import search as search_router
 from app.api.v1 import content as content_router
+from app.explainability import api as explainability_router
 from app.consumers.kafka_consumer import get_kafka_consumer
 from app.core.config import get_settings
 from app.core.database import Base, SessionLocal, engine, ensure_pgvector_extension, ensure_song_embeddings_hnsw_index
@@ -204,6 +212,11 @@ app.include_router(
     search_router.router,
     prefix="/api/v1/search",
     tags=["Semantic Search"],
+)
+app.include_router(
+    explainability_router.router,
+    # Note: prefix is already defined inside api.py as /api/v1/explainability
+    tags=["Explainability"],
 )
 
 

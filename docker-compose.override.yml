@@ -1,0 +1,40 @@
+# Default local runtime: use the same databases as the host .env files.
+# Keep docker-compose.yml unchanged so its isolated databases remain available.
+# .docker-host.env is private, ignored by Git, and uses host.docker.internal for PG.
+services:
+  mysql:
+    profiles: [isolated-db]
+  postgres:
+    profiles: [isolated-db]
+
+  backend:
+    env_file:
+      - ./backend/.env
+    environment:
+      DB_HOST: !reset null
+      DB_PORT: !reset null
+      DB_NAME: !reset null
+      DB_USER: !reset null
+      DB_PASSWORD: !reset null
+      JWT_SECRET: !reset null
+    depends_on: !override
+      kafka:
+        condition: service_healthy
+
+  mlops:
+    env_file:
+      - ./mlops/.env
+      - path: ./.docker-host.env
+        format: raw
+    environment:
+      DATABASE_URL: !reset null
+      MYSQL_URL: !reset null
+    depends_on: !override
+      kafka:
+        condition: service_healthy
+
+  streamlit:
+    env_file:
+      - ./backend/.env
+      - path: ./.docker-host.env
+        format: raw

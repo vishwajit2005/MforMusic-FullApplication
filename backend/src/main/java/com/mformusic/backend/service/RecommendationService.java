@@ -89,6 +89,7 @@ public class RecommendationService {
                     .collect(Collectors.toSet());
 
             // ── 4. Batch-fetch and enrich with MySQL metadata ─────────────────────
+            Set<String> seenTrackIds = new HashSet<>();
             List<Song> enriched = recs.stream()
                     .map(rec -> {
                         Optional<Song> opt = songRepository.findByExternalTrackId(rec.getSongId());
@@ -102,6 +103,7 @@ public class RecommendationService {
                         return song;
                     })
                     .filter(Objects::nonNull)
+                    .filter(song -> seenTrackIds.add(song.getExternalTrackId()))
                     // Preserve CF ranking by sorting on score descending
                     .sorted(Comparator.comparingDouble(
                             s -> -scoreByTrackId.getOrDefault(s.getExternalTrackId(), 0.0)

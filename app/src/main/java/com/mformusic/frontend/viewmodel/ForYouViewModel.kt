@@ -45,7 +45,8 @@ class ForYouViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 val response = api.getRecommendations(n)
                 if (response.isSuccessful) {
-                    val songs = response.body() ?: emptyList()
+                    val rawSongs = response.body() ?: emptyList()
+                    val songs = rawSongs.distinctBy { it.externalTrackId ?: it.id.toString() }
                     _uiState.value = ForYouUiState.Success(songs)
                     // Kick off background pre-caching on WiFi (Phase 5)
                     if (songs.isNotEmpty()) {

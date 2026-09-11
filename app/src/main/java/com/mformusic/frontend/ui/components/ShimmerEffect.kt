@@ -23,7 +23,7 @@ private fun shimmerBrush(): Brush {
     )
     val transition = rememberInfiniteTransition(label = "shimmer")
     val translateAnim by transition.animateFloat(
-        initialValue = 0f,
+        initialValue = 1f,
         targetValue = 1000f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 1200, easing = LinearEasing),
@@ -55,11 +55,11 @@ fun ShimmerBox(
 @Composable
 fun ShimmerSongCard() {
     val brush = shimmerBrush()
-    Column(modifier = Modifier.width(150.dp)) {
+    Column(modifier = Modifier.width(176.dp)) {
         Box(
             modifier = Modifier
-                .size(150.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .size(176.dp)
+                .clip(RoundedCornerShape(16.dp))
                 .background(brush)
         )
         Spacer(modifier = Modifier.height(8.dp))
