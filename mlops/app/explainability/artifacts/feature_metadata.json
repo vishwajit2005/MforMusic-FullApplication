@@ -1,0 +1,54 @@
+{
+  "likes_count": {
+    "label": "Song Popularity (Likes)",
+    "description": "Total likes this song has received across all users"
+  },
+  "user_play_count": {
+    "label": "Your Play History",
+    "description": "How many times you have played this song before"
+  },
+  "skip_count": {
+    "label": "Your Skip History",
+    "description": "How many times you have skipped this song (negative signal)"
+  },
+  "completion_rate": {
+    "label": "Average Listen Completion",
+    "description": "Average fraction of the song you listen to (0\u20131)"
+  },
+  "genre_language_match": {
+    "label": "Language Match",
+    "description": "1 if this song's language matches your most-listened language"
+  },
+  "decade_match": {
+    "label": "Era Match",
+    "description": "1 if this song's decade matches your preferred music era"
+  },
+  "content_similarity_score": {
+    "label": "Audio Similarity",
+    "description": "Cosine similarity to the seed song used for content-based recommendations (0 if not a content-based rec, or 0 for all historical rows where the serving tier was not logged \u2014 see README.md)."
+  },
+  "popularity_score": {
+    "label": "Global Popularity",
+    "description": "Log-normalized global play count of this song across all users"
+  },
+  "recency_days": {
+    "label": "Days Since You Last Listened",
+    "description": "How many days have passed since your last interaction with this song (higher = older)"
+  },
+  "tier_used_collaborative_filtering": {
+    "label": "Recommended by: Collaborative Filtering",
+    "description": "This recommendation came from the ALS collaborative filtering model"
+  },
+  "tier_used_content_based": {
+    "label": "Recommended by: Audio Similarity",
+    "description": "This recommendation came from the content-based similarity model"
+  },
+  "tier_used_popular": {
+    "label": "Recommended by: Popularity",
+    "description": "This recommendation came from the popular songs fallback"
+  },
+  "tier_used_unknown": {
+    "label": "Tier: Not Logged (Historical)",
+    "description": "The recommendation-serving tier was not logged for this historical interaction. All rows in the initial training dataset have this value. Once recommendation-serving events are logged, this field will be replaced by the actual tier (see README.md \u2014 Future Improvement)."
+  }
+}

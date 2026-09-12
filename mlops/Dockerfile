@@ -19,6 +19,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir "numpy>=1.26" --only-binary :all: && \
     pip install --no-cache-dir scipy --only-binary :all: && \
+    pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu "torch==2.14.0" && \
     pip install --no-cache-dir -r requirements.txt
 
 # ── Application source ────────────────────────────────────────────────────────

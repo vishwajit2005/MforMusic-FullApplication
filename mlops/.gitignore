@@ -12,3 +12,15 @@ build/
 app/explainability/artifacts/*.joblib
 app/explainability/artifacts/*.json
 app/explainability/dataset/*.parquet
+
+# Saved serving artifacts must ship with cloud deployments; training data stays ignored.
+!app/explainability/artifacts/surrogate_model.joblib
+!app/explainability/artifacts/shap_explainer.joblib
+!app/explainability/artifacts/feature_list.joblib
+!app/explainability/artifacts/feature_metadata.json
+!app/explainability/artifacts/global_importance.json
+
+# Private cloud deployment connection files
+.env.*
+
+.model_cache/

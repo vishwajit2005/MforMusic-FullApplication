@@ -1,0 +1,15 @@
+{
+  "recency_days": 0.517467,
+  "completion_rate": 0.312647,
+  "skip_count": 0.103592,
+  "user_play_count": 0.054764,
+  "likes_count": 0.0,
+  "genre_language_match": 0.0,
+  "decade_match": 0.0,
+  "content_similarity_score": 0.0,
+  "popularity_score": 0.0,
+  "tier_used_collaborative_filtering": 0.0,
+  "tier_used_content_based": 0.0,
+  "tier_used_popular": 0.0,
+  "tier_used_unknown": 0.0
+}

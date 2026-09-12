@@ -1,0 +1,80 @@
+services:
+- type: web
+  name: mformusic-embeddings
+  runtime: python
+  plan: free
+  region: singapore
+  repo: https://github.com/vishwajit2005/MforMusic-FullApplication
+  branch: main
+  buildCommand: bash mlops/cloud-build.sh
+  startCommand: python mlops/cloud-start.py
+  healthCheckPath: /health
+  envVars:
+  - key: PYTHON_VERSION
+    value: 3.12.13
+  - key: MFORMUSIC_ROLE
+    value: embeddings
+  - key: OPENBLAS_NUM_THREADS
+    value: '1'
+  - key: OMP_NUM_THREADS
+    value: '1'
+  - key: MLOPS_API_KEY
+    sync: false
+- type: web
+  name: mformusic-mlops
+  runtime: python
+  plan: free
+  region: singapore
+  repo: https://github.com/vishwajit2005/MforMusic-FullApplication
+  branch: main
+  buildCommand: bash mlops/cloud-build.sh
+  startCommand: python mlops/cloud-start.py
+  healthCheckPath: /health
+  envVars:
+  - key: PYTHON_VERSION
+    value: 3.12.13
+  - key: MFORMUSIC_ROLE
+    value: api
+  - key: OPENBLAS_NUM_THREADS
+    value: '1'
+  - key: OMP_NUM_THREADS
+    value: '1'
+  - key: MLOPS_API_KEY
+    sync: false
+  - key: DATABASE_URL
+    sync: false
+  - key: MYSQL_URL
+    sync: false
+  - key: EMBEDDING_SERVICE_URL
+    sync: false
+  - key: KAFKA_BOOTSTRAP_SERVERS
+    value: ''
+- type: web
+  name: mformusic-monitor
+  runtime: python
+  plan: free
+  region: singapore
+  repo: https://github.com/vishwajit2005/MforMusic-FullApplication
+  branch: main
+  buildCommand: bash mlops/cloud-build.sh
+  startCommand: python mlops/cloud-start.py
+  healthCheckPath: /_stcore/health
+  envVars:
+  - key: PYTHON_VERSION
+    value: 3.12.13
+  - key: MFORMUSIC_ROLE
+    value: dashboard
+  - key: OPENBLAS_NUM_THREADS
+    value: '1'
+  - key: OMP_NUM_THREADS
+    value: '1'
+  - key: MLOPS_API_KEY
+    sync: false
+  - key: DATABASE_URL
+    sync: false
+  - key: MYSQL_URL
+    sync: false
+  - key: EXPLAINABILITY_API_URL
+    sync: false
+  - key: DASHBOARD_PASSWORD
+    sync: false

@@ -38,6 +38,8 @@ def engine(kind):
         url = url.set(drivername="mysql+pymysql")
         args = {"connect_timeout": 2, "read_timeout": 3, "write_timeout": 3,
                 "ssl": {"check_hostname": True}}
+        if url.query.get("ssl_ca"):
+            args["ssl"]["ca"] = url.query["ssl_ca"]
     else:
         url = url.set(drivername="postgresql+psycopg2")
         args = {"connect_timeout": 2, "options": "-c statement_timeout=3000 -c default_transaction_read_only=on"}
@@ -86,7 +88,11 @@ def song_names():
 
 def api(base, path):
     try:
-        response = requests.get(f"{base.rstrip('/')}/{path.lstrip('/')}", timeout=(2, 4))
+        configured = os.getenv("EXPLAINABILITY_API_URL", "").removesuffix("/api/v1/explainability").rstrip("/")
+        headers = {}
+        if configured and base.rstrip("/") == configured and os.getenv("MLOPS_API_KEY"):
+            headers["X-MforMusic-Key"] = os.environ["MLOPS_API_KEY"]
+        response = requests.get(f"{base.rstrip('/')}/{path.lstrip('/')}", headers=headers, timeout=(2, 4))
         if not response.ok:
             return {"ok": False, "status": response.status_code, "at": now()}
         body = response.json()
