@@ -12,7 +12,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import java.util.concurrent.Executor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -28,6 +30,10 @@ public class TelemetryService {
     private final RestTemplate restTemplate;
     private final TelemetryEventProducer kafkaProducer;
     private final SongRepository songRepository;
+
+    @Autowired
+    @Qualifier("taskExecutor")
+    private Executor taskExecutor;
 
     @Value("${mlops.fastapi.url:http://localhost:8000}")
     private String fastApiBaseUrl;
@@ -105,8 +111,22 @@ public class TelemetryService {
      * @deprecated Prefer Kafka (Phase 9) for production. This HTTP path is kept
      *             as a development/fallback option.
      */
-    @Async("taskExecutor")
     public void forwardToFastApi(TelemetryEventDto dto) {
+        // Explicit submission also works for same-bean calls; @Async does not.
+        // The bounded executor rejects overload rather than running HTTP on the caller.
+        if (!fastApiEnabled || fastApiBaseUrl == null || fastApiBaseUrl.isBlank()) {
+            log.debug("HTTP telemetry forwarding disabled or URL missing: song={}", dto.getSongId());
+            return;
+        }
+        try {
+            taskExecutor.execute(() -> sendToFastApi(dto));
+        } catch (RuntimeException e) {
+            log.warn("Could not queue telemetry forwarding: user={}, song={}, error={}",
+                    dto.getUserId(), dto.getSongId(), e.toString());
+        }
+    }
+
+    private void sendToFastApi(TelemetryEventDto dto) {
         String targetUrl = fastApiBaseUrl + "/api/v1/interactions/ingest";
         try {
             HttpHeaders headers = new HttpHeaders();
@@ -117,7 +137,7 @@ public class TelemetryService {
             log.info("Successfully forwarded telemetry event to FastAPI via HTTP: user={}, song={}, type={}, target={}",
                     dto.getUserId(), dto.getSongId(), dto.getInteractionType(), targetUrl);
         } catch (Exception e) {
-            log.error("Failed to forward telemetry event to FastAPI via HTTP at {}: user={}, song={}, error={}",
+            log.warn("Failed to forward telemetry event to FastAPI via HTTP at {}: user={}, song={}, error={}",
                     targetUrl, dto.getUserId(), dto.getSongId(), e.getMessage(), e);
         }
     }

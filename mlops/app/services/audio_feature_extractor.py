@@ -7,6 +7,7 @@ the exact 63 acoustic features (matching the offline dataset schema) using libro
 
 import logging
 import os
+import subprocess
 import tempfile
 from typing import Any
 
@@ -104,7 +105,22 @@ def extract_features_from_url(audio_url: str, duration_sec: float = 45.0) -> dic
                         break
 
         # Load audio with librosa (first 30-45 seconds)
-        y, sr = librosa.load(tmp_path, sr=22050, duration=duration_sec, mono=True)
+        try:
+            y, sr = librosa.load(tmp_path, sr=22050, duration=duration_sec, mono=True)
+        except Exception:
+            # Some librosa/soundfile versions do not automatically try audioread
+            # for MP4/AAC stored behind an .mp3 URL. Probe the actual media with
+            # FFmpeg and keep the same 22,050 Hz mono input to feature extraction.
+            logger.info("Native audio decoder failed; trying FFmpeg")
+            decoded = subprocess.run(
+                ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+                 "-protocol_whitelist", "file,pipe", "-i", tmp_path,
+                 "-t", str(duration_sec), "-vn", "-ac", "1", "-ar", "22050",
+                 "-f", "f32le", "pipe:1"],
+                check=True, capture_output=True, timeout=60,
+            )
+            y = np.frombuffer(decoded.stdout, dtype="<f4").copy()
+            sr = 22050
         if len(y) == 0:
             logger.warning(f"Audio array is empty for {audio_url}")
             return None

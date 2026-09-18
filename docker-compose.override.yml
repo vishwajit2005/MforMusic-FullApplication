@@ -22,6 +22,10 @@ services:
         condition: service_healthy
 
   mlops:
+    # One model owner avoids divergent hot-swaps across independent worker processes.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--log-level", "info"]
+    volumes:
+      - content_model_data:/app/app/data/content_model
     env_file:
       - ./mlops/.env
       - path: ./.docker-host.env
@@ -38,3 +42,6 @@ services:
       - ./backend/.env
       - path: ./.docker-host.env
         format: raw
+
+volumes:
+  content_model_data:

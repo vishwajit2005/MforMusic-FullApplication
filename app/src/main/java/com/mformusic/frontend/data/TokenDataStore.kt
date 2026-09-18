@@ -23,6 +23,8 @@ private object PrefKeys {
 
 class TokenDataStore(private val context: Context) {
 
+    val userIdFlow: Flow<Long?> = context.dataStore.data.map { it[PrefKeys.USER_ID] }
+
     val tokenFlow: Flow<String?> = context.dataStore.data.map { it[PrefKeys.TOKEN] }
     val usernameFlow: Flow<String?> = context.dataStore.data.map { it[PrefKeys.USERNAME] }
     val emailFlow: Flow<String?> = context.dataStore.data.map { it[PrefKeys.EMAIL] }
@@ -41,7 +43,13 @@ class TokenDataStore(private val context: Context) {
     suspend fun getEmail(): String? = context.dataStore.data.first()[PrefKeys.EMAIL]
 
     suspend fun clearAuthData() {
-        context.dataStore.edit { it.clear() }
+        context.dataStore.edit {
+            // Keep each account's listening window, but never its logged-out credentials.
+            it.remove(PrefKeys.TOKEN)
+            it.remove(PrefKeys.USERNAME)
+            it.remove(PrefKeys.EMAIL)
+            it.remove(PrefKeys.USER_ID)
+        }
     }
 
     suspend fun hasToken(): Boolean = !getToken().isNullOrBlank()

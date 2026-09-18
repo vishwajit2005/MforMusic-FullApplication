@@ -28,6 +28,24 @@ import java.util.List;
 public class RecommendationController {
 
     private final RecommendationService recommendationService;
+    private final com.mformusic.backend.service.SimilarSongsService similarSongsService;
+
+    @GetMapping("/similar")
+    public ResponseEntity<List<Song>> getSimilarSongs(
+            @RequestParam("current_song_id") String currentId,
+            @RequestParam(value = "context_song_ids", required = false) List<String> context,
+            @RequestParam(defaultValue = "8") int n, Authentication auth) {
+        if (auth == null || !(auth.getPrincipal() instanceof UserPrincipal principal)) {
+            return ResponseEntity.status(401).build();
+        }
+        List<String> recent = context == null ? List.of() : context;
+        if (currentId.isBlank() || currentId.length() > 255 || recent.size() > 4
+                || recent.stream().anyMatch(id -> id.isBlank() || id.length() > 255)) {
+            return ResponseEntity.badRequest().build();
+        }
+        return ResponseEntity.ok(similarSongsService.getSimilar(principal.userId(), currentId,
+                recent, Math.min(Math.max(n, 1), 20)));
+    }
 
     /**
      * GET /api/v1/recommendations?n=20

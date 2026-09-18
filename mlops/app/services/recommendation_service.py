@@ -5,6 +5,7 @@ tracks interaction counts, and triggers retraining.
 
 import logging
 import threading
+from itertools import islice
 
 from sqlalchemy.orm import Session
 
@@ -78,13 +79,13 @@ def get_recommendations(
     user_id: str,
     db: Session,
     n: int | None = None,
+    diagnostics: dict | None = None,
 ) -> dict:
     """
     Returns personalized recommendations for user_id via a 3-tier fallback strategy:
-      1. Collaborative Filtering (ALS) — if CF is trained & user has >= MIN_INTERACTIONS_FOR_CF
-      2. Content-Based Similarity — if user has recent play/like interactions on songs
-         in the candidate dataset, query offline-trained NearestNeighbors
-      3. Popular Songs Fallback — if cold-start with no usable history or seed not found
+      Content-based taste profile and eligible CF are attempted in the order
+      selected by RECOMMENDATION_PRIORITY (content_first by default).
+      Popular songs remain the final fallback. Training is independent of order.
     """
     top_n = n or settings.TOP_N_RECOMMENDATIONS
 
@@ -98,59 +99,76 @@ def get_recommendations(
     user_count = len(user_interactions)
     interacted_song_ids = {i.song_id for i in user_interactions}
 
-    # ── Tier 1: Collaborative Filtering ───────────────────────────────────────
-    if cf_engine.is_trained and user_count >= settings.MIN_INTERACTIONS_FOR_CF:
-        recs = cf_engine.recommend_for_user(user_id, top_n)
-        if recs:
-            logger.info(
-                f"[Recs] CF recommendations for user={user_id}: "
-                f"{len(recs)} tracks (model={cf_engine.model_version})"
+    # This controls serving only. Ingestion and scheduled retraining still run
+    # independently, even when content recommendations satisfy every request.
+    tier_order = (
+        ("content", "cf") if settings.RECOMMENDATION_PRIORITY == "content_first"
+        else ("cf", "content")
+    )
+    for tier in tier_order:
+        if tier == "content" and diagnostics is not None:
+            diagnostics["content_fallback_reason"] = (
+                "content_model_unavailable" if not content_service.is_ready
+                else "no_history" if not user_interactions
+                else "no_positive_history"
             )
-            return {
-                "user_id": user_id,
-                "recommendations": recs,
-                "model_version": cf_engine.model_version,
-                "total": len(recs),
-                "source": "collaborative_filtering",
-            }
-        logger.info(
-            f"[Recs] User {user_id} not in current CF model — checking content-based fallback."
-        )
-
-    # ── Tier 2: Content-Based Similarity (Cold Start with Interaction History) ──
-    if content_service.is_ready and user_interactions:
-        # STRICT POSITIVE SIGNALS ONLY: like, play, download, playlist_add
-        # Negative signals (skip, unlike) are strictly forbidden from acting as seeds.
-        positive_types = {"like", "play", "download", "playlist_add"}
-        seed_interaction = next(
-            (
-                i for i in user_interactions
-                if (i.interaction_type or "").lower() in positive_types
-                and content_service.has_track(i.song_id)
-            ),
-            None,
-        )
-
-        if seed_interaction:
-            seed_song_id = seed_interaction.song_id
-            content_recs = content_service.get_similar_songs(
-                seed_track_id=seed_song_id,
-                n=top_n,
-                exclude_ids=interacted_song_ids,
-            )
-            if content_recs:
+        if tier == "cf" and cf_engine.is_trained and user_count >= settings.MIN_INTERACTIONS_FOR_CF:
+            recs = cf_engine.recommend_for_user(user_id, top_n)
+            if recs:
                 logger.info(
-                    f"[Recs] Content-based recommendations for user={user_id} "
-                    f"(seed={seed_song_id}): {len(content_recs)} tracks "
-                    f"(model={content_service.model_version})"
+                    f"[Recs] CF recommendations for user={user_id}: "
+                    f"{len(recs)} tracks (model={cf_engine.model_version})"
                 )
                 return {
                     "user_id": user_id,
-                    "recommendations": content_recs,
-                    "model_version": content_service.model_version,
-                    "total": len(content_recs),
-                    "source": "content_based",
+                    "recommendations": recs,
+                    "model_version": cf_engine.model_version,
+                    "total": len(recs),
+                    "source": "collaborative_filtering",
                 }
+            logger.info(
+                f"[Recs] CF returned no recommendations for user={user_id} — trying the next tier."
+            )
+
+        if tier == "content" and content_service.is_ready and user_interactions:
+            # STRICT POSITIVE SIGNALS ONLY: like, play, download, playlist_add
+            # Negative signals (skip, unlike) are strictly forbidden from acting as seeds.
+            positive_types = {"like", "play", "download", "playlist_add"}
+            recent_positive_track_ids = list(islice(
+                (
+                    i.song_id for i in user_interactions
+                    if (i.interaction_type or "").lower() in positive_types
+                ),
+                10,
+            ))
+
+            if recent_positive_track_ids:
+                content_recs = content_service.get_taste_recommendations(
+                    recent_positive_track_ids=recent_positive_track_ids,
+                    n=top_n,
+                    exclude_ids=interacted_song_ids,
+                )
+                if not content_recs and diagnostics is not None:
+                    # An empty query can also mean exhausted candidates or a
+                    # query failure; only mark coverage when no seed matches.
+                    diagnostics["content_fallback_reason"] = (
+                        "no_recent_catalog_match"
+                        if not any(content_service.has_track(tid) for tid in recent_positive_track_ids)
+                        else "no_content_results"
+                    )
+                if content_recs:
+                    logger.info(
+                        f"[Recs] Content-based recommendations for user={user_id} "
+                        f"(positive_window={len(recent_positive_track_ids)}): {len(content_recs)} tracks "
+                        f"(model={content_service.model_version})"
+                    )
+                    return {
+                        "user_id": user_id,
+                        "recommendations": content_recs,
+                        "model_version": content_service.model_version,
+                        "total": len(content_recs),
+                        "source": "content_based",
+                    }
 
     # ── Tier 3: Popular Songs Fallback ────────────────────────────────────────
     logger.info(
@@ -164,6 +182,37 @@ def get_recommendations(
         "model_version": cf_engine.model_version,
         "total": len(songs),
         "source": "popular" if songs else "cold_start",
+    }
+
+
+def get_similar_recommendations(
+    user_id: str,
+    current_song_id: str,
+    context_song_ids: list[str],
+    db: Session,
+    n: int = 20,
+) -> dict:
+    """Now Playing only: exclude complete history, never invoke CF/popular."""
+    # One read serves exclusions, latest-positive quality and recent rejections.
+    history = (
+        db.query(Interaction).filter(Interaction.user_id == user_id)
+        .order_by(Interaction.created_at.desc(), Interaction.id.desc()).all()
+    )
+    interacted_song_ids = {event.song_id for event in history}
+    recommendations = content_service.get_now_playing_recommendations(
+        current_track_id=current_song_id,
+        context_track_ids=context_song_ids,
+        n=n,
+        exclude_ids=interacted_song_ids,
+        interaction_history=history,
+    )
+    return {
+        "user_id": user_id,
+        "current_song_id": current_song_id,
+        "recommendations": recommendations,
+        "model_version": content_service.model_version,
+        "total": len(recommendations),
+        "source": "content_based",
     }
 
 

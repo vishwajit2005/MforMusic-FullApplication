@@ -26,6 +26,8 @@ class BackendFlowsIntegrationTest {
     @Autowired UserInteractionRepository interactions;
     @Autowired UserPlayHistoryRepository history;
     @Autowired CapacityTestConfig.BoundaryStub stub;
+    @Autowired @org.springframework.beans.factory.annotation.Qualifier("taskExecutor")
+    java.util.concurrent.Executor executor;
     final HttpClient client=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
     final tools.jackson.databind.json.JsonMapper json=tools.jackson.databind.json.JsonMapper.builder().build();
     String token;
@@ -35,8 +37,13 @@ class BackendFlowsIntegrationTest {
         token=jwt.generateToken(user.getId(),user.getEmail(),user.getUsername());
         stub.fastapiMode="ok"; stub.fastapiDelayMs=0; stub.saavnDelayMs=0;
     }
-    @AfterEach void reset() {
+    @AfterEach void reset() throws Exception {
         if(stub.releaseForward!=null) stub.releaseForward.countDown();
+        var pool=(org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor)executor;
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+        while ((pool.getActiveCount()>0 || !pool.getThreadPoolExecutor().getQueue().isEmpty())
+                && System.nanoTime()<deadline) Thread.sleep(10);
+        assertEquals(0,pool.getActiveCount(),"Background forwarding should finish before resetting the stub");
         stub.forwardEntered=null; stub.releaseForward=null; stub.fastapiMode="ok";
         assertEquals(0,stub.blocked.get(),"Unexpected outbound request attempted");
     }
@@ -111,7 +118,7 @@ class BackendFlowsIntegrationTest {
             assertTrue(stub.forwardEntered.await(3,TimeUnit.SECONDS),"Forward should start");
             // The downstream is held at a latch; true fire-and-forget returns before it is released.
             var response=assertDoesNotThrow(() -> future.get(500,TimeUnit.MILLISECONDS),
-                "Known contract gap: same-bean @Async invocation blocks the request on FastAPI");
+                "Telemetry acceptance must not wait for downstream forwarding");
             assertEquals(202,response.statusCode());
         } finally { stub.releaseForward.countDown(); future.get(5,TimeUnit.SECONDS); }
     }

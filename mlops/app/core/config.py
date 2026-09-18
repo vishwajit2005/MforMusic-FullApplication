@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 from pydantic_settings import BaseSettings
 
 
@@ -17,7 +18,7 @@ class Settings(BaseSettings):
     CF_REGULARIZATION: float = 0.01
 
     # ── Cold-start threshold ─────────────────────────────────────────────────
-    # Users with fewer interactions than this get "popular songs" fallback
+    # Minimum history needed to attempt CF; content recommendations are independent.
     MIN_INTERACTIONS_FOR_CF: int = 3
 
     # ── Auto-retrain trigger ─────────────────────────────────────────────────
@@ -28,6 +29,9 @@ class Settings(BaseSettings):
 
     # ── Recommendation defaults ──────────────────────────────────────────────
     TOP_N_RECOMMENDATIONS: int = 20
+    # Serving priority only; CF training/retraining is unaffected. Restart the
+    # service after changing this env var because get_settings() is cached.
+    RECOMMENDATION_PRIORITY: Literal["content_first", "cf_first"] = "content_first"
 
     # ── Content-based model artifacts directory & retraining ─────────────────
     # Directory containing nn_model.joblib, scaler.joblib, encoders, combined_features.csv, track_index.csv
@@ -35,7 +39,7 @@ class Settings(BaseSettings):
     # Daily retraining interval (86400 seconds)
     CONTENT_RETRAIN_INTERVAL_SECONDS: int = 86400
     # Minimum un-incorporated extracted songs required to trigger automatic retraining
-    MIN_NEW_SONGS_FOR_CONTENT_RETRAIN: int = 20
+    MIN_NEW_SONGS_FOR_CONTENT_RETRAIN: int = 5
 
     # ── Service ─────────────────────────────────────────────────────────────
     PORT: int = 8000

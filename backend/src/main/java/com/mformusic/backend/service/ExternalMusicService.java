@@ -23,6 +23,24 @@ public class ExternalMusicService {
     @Autowired
     private RestTemplate restTemplate;
 
+    /** Resolve catalogue tracks by ID, never by ambiguous song title. */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> getSongsByIds(List<String> ids) {
+        if (ids.isEmpty()) return List.of();
+        String encodedIds = ids.stream()
+                .map(id -> org.springframework.web.util.UriUtils.encodePathSegment(id, java.nio.charset.StandardCharsets.UTF_8))
+                .collect(java.util.stream.Collectors.joining(","));
+        Map<String, Object> response = restTemplate.getForObject(
+                java.net.URI.create("https://mformusic-api.onrender.com/api/songs/" + encodedIds), Map.class);
+        if (response == null || !Boolean.TRUE.equals(response.get("success"))) {
+            throw new IllegalStateException("Song lookup unavailable");
+        }
+        List<Map<String, Object>> data = (List<Map<String, Object>>) response.get("data");
+        if (data == null) return List.of();
+        return data.stream().map(this::extractSongData).filter(java.util.Objects::nonNull)
+                .filter(song -> ids.contains(song.get("id"))).toList();
+    }
+
     /**
      * Search JioSaavn and return the single best match (used for play/cache flow).
      */

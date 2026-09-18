@@ -4,10 +4,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 FROM python:3.12-slim AS base
 
+# FFmpeg lets librosa/audioread decode MP4/AAC streams, even with .mp3 URLs.
 # Build tools for any packages that still need compilation
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -42,5 +44,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 CMD ["uvicorn", "app.main:app", \
      "--host", "0.0.0.0", \
      "--port", "8000", \
-     "--workers", "2", \
+     "--workers", "1", \
      "--log-level", "info"]

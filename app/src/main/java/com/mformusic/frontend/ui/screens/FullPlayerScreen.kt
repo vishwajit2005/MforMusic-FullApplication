@@ -47,6 +47,12 @@ fun FullPlayerScreen(
     val isShuffleOn by playerViewModel.isShuffleOn.collectAsStateWithLifecycle()
     val repeatMode by playerViewModel.repeatMode.collectAsStateWithLifecycle()
 
+    val similar by playerViewModel.similarSongs.collectAsStateWithLifecycle()
+    var showSimilar by remember { mutableStateOf(false) }
+    LaunchedEffect(showSimilar, currentTrack?.externalTrackId) {
+        if (showSimilar && currentTrack != null) playerViewModel.loadSimilarSongs()
+    }
+
     var showMenu by remember { mutableStateOf(false) }
     val progress = if (duration > 0) position.toFloat() / duration.toFloat() else 0f
 
@@ -273,6 +279,53 @@ fun FullPlayerScreen(
             }
 
             Spacer(modifier = Modifier.height(20.dp))
+            OutlinedButton(
+                onClick = { showSimilar = !showSimilar },
+                enabled = currentTrack != null,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.QueueMusic, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(if (showSimilar) "Hide similar songs" else "Similar songs")
+            }
+            if (showSimilar) {
+                Text("Inspired by this song and your recent listening", color = TextSecondary,
+                    fontSize = 13.sp, modifier = Modifier.padding(vertical = 12.dp))
+                when {
+                    similar.loading -> CircularProgressIndicator(
+                        color = Accent, modifier = Modifier.padding(16.dp))
+                    similar.error != null -> {
+                        Text(similar.error ?: "Please try again", color = TextSecondary)
+                        TextButton(onClick = playerViewModel::loadSimilarSongs) { Text("Retry") }
+                    }
+                    similar.songs.isEmpty() -> Text(
+                        "No similar songs yet. Try another song as the catalog grows.",
+                        color = TextSecondary, modifier = Modifier.padding(vertical = 16.dp))
+                }
+                similar.songs.forEach { song ->
+                    Surface(
+                        onClick = { playerViewModel.playSimilarSong(song) },
+                        enabled = similar.playingId == null,
+                        color = DarkCardElevated, shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    ) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            AlbumArtwork(song.thumbnailUrl, Modifier.size(48.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(song.title, color = TextPrimary, fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(song.artistName ?: "Unknown artist", color = TextSecondary,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
+                            }
+                            if (similar.playingId == song.externalTrackId) {
+                                CircularProgressIndicator(Modifier.size(24.dp), color = Accent, strokeWidth = 2.dp)
+                            } else Icon(Icons.Default.PlayArrow, "Play ${song.title}", tint = Accent)
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }

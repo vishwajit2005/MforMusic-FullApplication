@@ -14,6 +14,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -44,6 +46,17 @@ public class SongService {
     @Transactional
     public Song playOrCacheSong(String songName, Long userId) {
         Map<String, Object> externalData = externalMusicService.searchSongOnSaavn(songName);
+        return resolveAndPlay(externalData, songName, userId);
+    }
+
+    @Transactional
+    public Song playByExternalId(String externalTrackId, Long userId) {
+        Map<String, Object> data = externalMusicService.getSongsByIds(List.of(externalTrackId))
+                .stream().findFirst().orElse(null);
+        return resolveAndPlay(data, externalTrackId, userId);
+    }
+
+    private Song resolveAndPlay(Map<String, Object> externalData, String songName, Long userId) {
         if (externalData == null) {
             log.warn("No result found on JioSaavn for: {}", songName);
             return null;
@@ -81,8 +94,12 @@ public class SongService {
             song = songRepository.save(newSong);
             log.info("Saved new song to DB: id={}, externalTrackId={}", song.getId(), song.getExternalTrackId());
 
-            // Trigger background upload (separate bean, proper @Async behavior)
-            asyncUploadService.uploadToSupabaseAsync(song.getId(), saavnAudioUrl);
+        }
+
+        // A cached DB row may still need its first successful upload. Schedule only
+        // after commit so the separate upload transaction can see the saved song.
+        if (!Boolean.TRUE.equals(song.getStoredInS3())) {
+            scheduleUploadAfterCommit(song.getId(), saavnAudioUrl);
         }
 
         // Record per-user play history
@@ -93,6 +110,22 @@ public class SongService {
         }
 
         return song;
+    }
+
+    private void scheduleUploadAfterCommit(Long songId, String sourceUrl) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    asyncUploadService.uploadToSupabaseAsync(songId, sourceUrl);
+                } catch (Exception e) {
+                    // The play is already committed. A full executor must not turn
+                    // successful playback into an error; a later play can try again.
+                    log.warn("[BG-Upload] Could not schedule upload for song ID {}: {}",
+                            songId, e.getMessage());
+                }
+            }
+        });
     }
 
     private void recordPlayHistory(Long userId, Song song) {

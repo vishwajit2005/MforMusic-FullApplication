@@ -158,6 +158,12 @@ class TestContentOrganicGrowthAndRetraining(unittest.TestCase):
             self.assertIsNotNone(meta)
             self.assertEqual(meta["title"], "Synthetic New Song")
 
+            # A fresh process must report the saved version and load the added track.
+            restarted = ContentRecommendationService()
+            self.assertTrue(restarted.load_artifacts(temp_dir))
+            self.assertEqual(restarted.model_version, service.model_version)
+            self.assertTrue(restarted.has_track(new_id))
+
             # Check DB row is marked incorporated
             db_row = self.db.query(SongAudioFeature).filter(SongAudioFeature.song_id == new_id).first()
             self.assertTrue(db_row.incorporated_in_model)

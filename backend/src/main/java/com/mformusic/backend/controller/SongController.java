@@ -21,6 +21,17 @@ public class SongController {
     @Autowired
     private SongService songService;
 
+    @PostMapping("/play/by-id")
+    public ResponseEntity<Song> playById(@RequestParam String externalTrackId, Authentication auth) {
+        Long userId = extractUserId(auth);
+        if (userId == null) return ResponseEntity.status(401).build();
+        if (externalTrackId.isBlank() || externalTrackId.length() > 255) {
+            return ResponseEntity.badRequest().build();
+        }
+        Song song = songService.playByExternalId(externalTrackId, userId);
+        return song == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(song);
+    }
+
     /**
      * POST /api/v1/songs/play?songName=...
      * Plays (or caches) a song and records play in the user's history.

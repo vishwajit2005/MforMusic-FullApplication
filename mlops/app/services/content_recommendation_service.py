@@ -26,6 +26,32 @@ from app.models.song_audio_feature import SongAudioFeature, FEATURE_COLUMNS_63
 
 logger = logging.getLogger(__name__)
 
+REJECT_SIMILARITY_THRESHOLD = 0.75
+REJECT_PENALTY = 0.30
+
+
+def _context_quality(event: Any | None) -> float:
+    """Quality of the latest positive event; missing data is neutral context."""
+    if event is None:
+        return 0.8
+    kind = (getattr(event, "interaction_type", None) or "").lower()
+    if kind in {"like", "playlist_add"}:
+        return 1.5
+    if kind == "download":
+        return 1.4
+    if kind == "play":
+        value = getattr(event, "completion_rate", None)
+        try:
+            if value is None or isinstance(value, bool):
+                return 0.8
+            completion = float(value)
+            if np.isfinite(completion):
+                return 0.5 + min(1.0, max(0.0, completion))
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return 0.8
+
+
 
 class ContentRecommendationService:
     """
@@ -208,7 +234,9 @@ class ContentRecommendationService:
             track_id_to_idx = {tid: idx for idx, tid in enumerate(track_ids)}
             idx_to_track_id = {idx: tid for idx, tid in enumerate(track_ids)}
 
-            version_tag = f"content_knn_v1_{len(track_ids)}s"
+            version_file = resolved_dir / "model_version.txt"
+            version_tag = (version_file.read_text().strip() if version_file.exists()
+                           else f"content_knn_v1_{len(track_ids)}s")
 
             with self._lock:
                 self._nn_model = nn_model
@@ -286,6 +314,172 @@ class ContentRecommendationService:
 
             except Exception as e:
                 logger.error(f"Error querying nearest neighbors for seed '{seed_str}': {e}", exc_info=True)
+                return []
+
+    def get_taste_recommendations(
+        self,
+        recent_positive_track_ids: list[str],
+        n: int = 20,
+        exclude_ids: set[str] | list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Query the fitted model with the latest ten positive events, newest first.
+
+        The caller filters event types; repeated songs retain their event weights.
+        Missing tracks consume a window position but contribute no vector.
+        """
+        track_ids = [str(tid) for tid in recent_positive_track_ids[:10]]
+        # Linear event-recency decay: newest=10, oldest=1. Keep original ranks
+        # across missing songs; averaging renormalizes the surviving weights.
+        return self._get_weighted_recommendations(
+            track_ids, [10 - rank for rank in range(len(track_ids))], n, exclude_ids,
+        )
+
+    def get_now_playing_recommendations(
+        self,
+        current_track_id: str,
+        context_track_ids: list[str],
+        n: int = 20,
+        exclude_ids: set[str] | list[str] | None = None,
+        interaction_history: list[Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Immediate context; history must be newest first. No other tier."""
+        history = interaction_history if interaction_history is not None else []
+        context_ids = [str(tid) for tid in context_track_ids[:4]]
+        latest_positive = {}
+        for event in history:
+            song_id = str(event.song_id)
+            if (
+                song_id in context_ids and song_id not in latest_positive
+                and (event.interaction_type or "").lower()
+                in {"like", "playlist_add", "download", "play"}
+            ):
+                latest_positive[song_id] = event
+
+        # Anchor stays 70. Context quality multiplies positional recency only.
+        # Even all four contexts at quality=1.5 sum to 45, below the anchor.
+        weights = [70.0] + [
+            position * _context_quality(latest_positive.get(tid))
+            for tid, position in zip(context_ids, [12, 8, 6, 4])
+        ]
+        track_ids = [str(current_track_id)] + context_ids
+        with self._lock:
+            # Drop unknown tracks before normalization. Passing weights summing
+            # to one leaves the shared For You query helper entirely unchanged.
+            surviving_total = sum(
+                weight for tid, weight in zip(track_ids, weights)
+                if tid in self._track_id_to_idx
+            )
+            if not surviving_total:
+                return []
+            normalized_weights = [
+                weight / surviving_total if tid in self._track_id_to_idx else 0.0
+                for tid, weight in zip(track_ids, weights)
+            ]
+            original_results = self._get_weighted_recommendations(
+                track_ids, normalized_weights, n, exclude_ids,
+            )
+            # Keep the same artifact snapshot for query and rejection vectors.
+            return self._rerank_strong_rejects(original_results, history)
+
+    def _rerank_strong_rejects(
+        self, original_results: list[dict[str, Any]], history: list[Any],
+    ) -> list[dict[str, Any]]:
+        """Best-effort post-query penalty; any failure preserves every score."""
+        try:
+            if not original_results:
+                return original_results
+            with self._lock:
+                strong_reject_ids = []
+                for event in history:
+                    kind = (event.interaction_type or "").lower()
+                    completion = getattr(event, "completion_rate", None)
+                    if kind == "unlike" or (
+                        kind == "skip" and (completion is None or completion < 0.2)
+                    ):
+                        strong_reject_ids.append(str(event.song_id))
+                        if len(strong_reject_ids) == 5:
+                            break
+                indices = [self._track_id_to_idx[tid] for tid in strong_reject_ids
+                           if tid in self._track_id_to_idx]
+                if not indices:
+                    return original_results
+                centroid = np.mean(self._features_matrix[indices], axis=0)
+                centroid_norm = np.linalg.norm(centroid)
+                if not np.isfinite(centroid).all() or not np.isfinite(centroid_norm) or centroid_norm == 0:
+                    return original_results
+
+                adjusted = [dict(result) for result in original_results]
+                for result in adjusted:
+                    vector = self._features_matrix[self._track_id_to_idx[result["song_id"]]]
+                    norm = np.linalg.norm(vector)
+                    if not np.isfinite(vector).all() or not np.isfinite(norm):
+                        raise ValueError("Invalid rejection candidate vector")
+                    similarity = float(np.dot(vector, centroid) / (norm * centroid_norm)) if norm else 0.0
+                    if not np.isfinite(similarity):
+                        raise ValueError("Invalid rejection similarity")
+                    penalty_flag = int(similarity > REJECT_SIMILARITY_THRESHOLD)
+                    result["score"] = result["score"] * (1 - REJECT_PENALTY * penalty_flag)
+                # Python sort is stable: equal adjusted scores retain query order.
+                adjusted.sort(key=lambda result: result["score"], reverse=True)
+                for rank, result in enumerate(adjusted, 1):
+                    result["rank"] = rank
+                return adjusted
+        except Exception:
+            logger.warning("Similar Songs rejection re-ranking failed; retaining original scores", exc_info=True)
+            return original_results
+
+    def _get_weighted_recommendations(
+        self,
+        track_ids: list[str],
+        event_weights: list[float],
+        n: int,
+        exclude_ids: set[str] | list[str] | None,
+    ) -> list[dict[str, Any]]:
+        """Shared query implementation; both modes use the same loaded model."""
+        with self._lock:
+            if (
+                not self._is_ready or self._nn_model is None
+                or self._features_matrix is None or n <= 0
+            ):
+                return []
+            exclude_set = {str(tid) for tid in (exclude_ids or [])}
+            exclude_set.update(track_ids)
+            indices, weights = [], []
+            for track_id, weight in zip(track_ids, event_weights):
+                idx = self._track_id_to_idx.get(track_id)
+                if idx is not None:
+                    indices.append(idx)
+                    weights.append(weight)
+            if not indices:
+                return []
+
+            try:
+                taste_vector = np.average(
+                    self._features_matrix[indices], axis=0, weights=weights,
+                ).reshape(1, -1)
+                if not np.isfinite(taste_vector).all() or not np.any(taste_vector):
+                    return []
+                # One lock covers vectors, query and ID mapping so a concurrent
+                # model hot-swap cannot mix two catalog versions. No fit occurs.
+                k_query = min(n + len(exclude_set) + 5, len(self._track_ids))
+                distances, neighbors = self._nn_model.kneighbors(
+                    taste_vector, n_neighbors=k_query,
+                )
+                results = []
+                for idx, distance in zip(neighbors[0], distances[0]):
+                    candidate_id = self._idx_to_track_id.get(int(idx))
+                    if not candidate_id or candidate_id in exclude_set:
+                        continue
+                    results.append({
+                        "song_id": candidate_id,
+                        "score": round(max(0.0, 1.0 - float(distance)), 4),
+                        "rank": len(results) + 1,
+                    })
+                    if len(results) >= n:
+                        break
+                return results
+            except Exception:
+                logger.exception("Error querying nearest neighbors for weighted content profile")
                 return []
 
     # ── Retraining & Hot-Swap Engine ──────────────────────────────────────────
@@ -465,6 +659,12 @@ class ContentRecommendationService:
             joblib.dump(new_nn_model, resolved_dir / "nn_model.joblib")
             final_combined_df.to_csv(features_path, index=False)
             combined_meta_df.to_csv(track_index_path, index=False)
+
+            # Persist the version with the artifacts so a restart reports the same model.
+            version_tag = f"content_knn_v2_{len(track_ids)}s"
+            version_tmp = resolved_dir / "model_version.txt.tmp"
+            version_tmp.write_text(version_tag + "\n")
+            version_tmp.replace(resolved_dir / "model_version.txt")
 
             # Mark processed rows as incorporated in PostgreSQL
             for row in new_features_rows:

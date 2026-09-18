@@ -15,6 +15,17 @@ import com.mformusic.frontend.telemetry.PlaybackTelemetryListener
 import com.mformusic.frontend.telemetry.TelemetryRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import com.mformusic.frontend.data.RecentListeningStore
+import com.mformusic.frontend.data.TokenDataStore
+import com.mformusic.frontend.data.dataStore
 
 object PlayerManager {
 
@@ -27,6 +38,63 @@ object PlayerManager {
     // ── Playback state ─────────────────────────────────────────────────────────
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying
+
+    private val listeningScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var listeningStore: RecentListeningStore? = null
+    private var listeningAuth: TokenDataStore? = null
+    private var listeningAccount: Long? = null
+    private var listeningAccountJob: Job? = null
+    private var listeningWrite: Job? = null
+
+    private fun initializeListening(context: Context, userId: String) {
+        if (listeningAccountJob?.isActive == true) return
+        listeningStore = RecentListeningStore(context.applicationContext.dataStore)
+        listeningAuth = TokenDataStore(context.applicationContext)
+        listeningAccount = userId.toLongOrNull()
+        listeningAccountJob = listeningScope.launch {
+            listeningAuth!!.userIdFlow.distinctUntilChanged().collectLatest { account ->
+                listeningAccount = account
+                _recentPlayedSongIds.value = emptyList()
+                if (account != null) {
+                    try {
+                        val history = listeningStore!!.read(account)
+                        _recentPlayedSongIds.value = RecentListeningStore.context(
+                            history, _currentTrack.value?.externalTrackId.orEmpty())
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { android.util.Log.w("PlayerManager", "Could not restore listening context", e) }
+                }
+            }
+        }
+    }
+
+    private fun rememberPlayedTrack(songId: String) {
+        val account = listeningAccount ?: return
+        val store = listeningStore ?: return
+        val previousWrite = listeningWrite
+        listeningWrite = listeningScope.launch {
+            try {
+                previousWrite?.join()
+                val history = store.record(account, songId)
+                if (listeningAccount == account) {
+                    _recentPlayedSongIds.value = RecentListeningStore.context(history, songId)
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { android.util.Log.w("PlayerManager", "Could not save listening context", e) }
+        }
+    }
+
+    /** Await playback persistence, then restore this logged-in account's context. */
+    suspend fun recentContextFor(currentId: String): List<String> {
+        listeningWrite?.join()
+        val account = listeningAuth?.getUserId() ?: return emptyList()
+        val history = listeningStore?.read(account).orEmpty()
+        if (listeningAuth?.getUserId() != account) return emptyList()
+        return RecentListeningStore.context(history, currentId)
+    }
+
+    // Actual played tracks, newest first; not future queue entries.
+    private val _recentPlayedSongIds = MutableStateFlow<List<String>>(emptyList())
+    val recentPlayedSongIds: StateFlow<List<String>> = _recentPlayedSongIds
 
     private val _currentTrack = MutableStateFlow<SongResponse?>(null)
     val currentTrack: StateFlow<SongResponse?> = _currentTrack
@@ -76,6 +144,7 @@ object PlayerManager {
 
     // ── Initialization ────────────────────────────────────────────────────────
     fun initialize(context: Context, userId: String = "") {
+        initializeListening(context, userId)
         if (exoPlayer != null) {
             telemetryListener?.updateUserId(userId)
             return
@@ -259,6 +328,7 @@ object PlayerManager {
             player.prepare()
             player.play()
 
+            rememberPlayedTrack(song.externalTrackId)
             _currentTrack.value = song
             _currentTrackTitle.value = song.title
             _currentArtistName.value = song.artistName?.ifBlank { "Unknown Artist" } ?: "Unknown Artist"
@@ -279,6 +349,12 @@ object PlayerManager {
     }
 
     fun release() {
+        listeningAccountJob?.cancel()
+        listeningAccountJob = null
+        listeningAccount = null
+        // Allow an already-started DataStore write to finish across activity teardown.
+        _recentPlayedSongIds.value = emptyList()
+        _currentTrack.value = null
         handler.removeCallbacks(positionUpdater)
         exoPlayer?.release()
         exoPlayer = null

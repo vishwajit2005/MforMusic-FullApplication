@@ -13,6 +13,16 @@ import retrofit2.http.Path
 
 interface MusicApiService {
 
+    @GET("api/v1/recommendations/similar")
+    suspend fun getSimilarSongs(
+        @Query("current_song_id") currentSongId: String,
+        @Query("context_song_ids") contextSongIds: List<String>,
+        @Query("n") n: Int = 8
+    ): Response<List<SongResponse>>
+
+    @POST("api/v1/songs/play/by-id")
+    suspend fun playSongById(@Query("externalTrackId") externalTrackId: String): Response<SongResponse>
+
     // ── Auth ──────────────────────────────────────────────────────────────────
 
     @POST("api/v1/auth/register")

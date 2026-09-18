@@ -18,12 +18,78 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
  * ViewModel wrapping PlayerManager state, database persistence, download manager, and telemetry.
  * Exposes player state to Compose UI and survives recomposition.
  */
 class PlayerViewModel(application: Application) : AndroidViewModel(application) {
+
+    data class SimilarSongsState(
+        val loading: Boolean = false,
+        val songs: List<SongResponse> = emptyList(),
+        val error: String? = null,
+        val playingId: String? = null
+    )
+    private val _similarSongs = MutableStateFlow(SimilarSongsState())
+    val similarSongs: StateFlow<SimilarSongsState> = _similarSongs.asStateFlow()
+    private var similarJob: Job? = null
+
+    fun loadSimilarSongs() {
+        val id = currentTrack.value?.externalTrackId ?: return
+        similarJob?.cancel()
+        _similarSongs.value = SimilarSongsState(loading = true)
+        similarJob = viewModelScope.launch {
+            try {
+                val context = PlayerManager.recentContextFor(id)
+                if (currentTrack.value?.externalTrackId != id) return@launch
+                val response = api.getSimilarSongs(id, context)
+                if (currentTrack.value?.externalTrackId != id) return@launch
+                _similarSongs.value = if (response.isSuccessful) {
+                    SimilarSongsState(songs = response.body().orEmpty())
+                } else SimilarSongsState(error = "Couldn't load similar songs. Please try again.")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (currentTrack.value?.externalTrackId == id) {
+                    _similarSongs.value = SimilarSongsState(error = "Couldn't connect. Please try again.")
+                }
+            }
+        }
+    }
+
+    fun playSimilarSong(song: SongResponse) {
+        if (_similarSongs.value.playingId != null) return
+        val sourceId = currentTrack.value?.externalTrackId
+        _similarSongs.value = _similarSongs.value.copy(playingId = song.externalTrackId, error = null)
+        viewModelScope.launch {
+            try {
+                val response = api.playSongById(song.externalTrackId)
+                if (currentTrack.value?.externalTrackId != sourceId) return@launch
+                val resolved = response.body()
+                if (!response.isSuccessful || resolved == null || resolved.externalTrackId != song.externalTrackId) {
+                    _similarSongs.value = _similarSongs.value.copy(error = "Couldn't play this song. Try again.")
+                    return@launch
+                }
+                val queue = _similarSongs.value.songs.map { if (it.externalTrackId == resolved.externalTrackId) resolved else it }
+                val index = queue.indexOfFirst { it.externalTrackId == resolved.externalTrackId }
+                if (index >= 0) PlayerManager.setQueueAndPlay(
+                    queue.map { it to (it.s3Url?.takeIf(String::isNotBlank) ?: it.saavnUrl) }, index)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (currentTrack.value?.externalTrackId == sourceId) {
+                    _similarSongs.value = _similarSongs.value.copy(error = "Couldn't play this song. Try again.")
+                }
+            } finally {
+                _similarSongs.value = _similarSongs.value.copy(playingId = null)
+            }
+        }
+    }
 
     private val api = RetrofitClient.musicApiService
     private val db = AppDatabase.getDatabase(application)
@@ -53,6 +119,12 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     val isDownloading: StateFlow<Boolean> = _isDownloading.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            currentTrack.map { it?.externalTrackId }.distinctUntilChanged().collect {
+                similarJob?.cancel()
+                _similarSongs.value = SimilarSongsState()
+            }
+        }
         // Load userId asynchronously for telemetry
         viewModelScope.launch {
             currentUserId = tokenDataStore.getUserId()?.toString() ?: ""

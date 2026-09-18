@@ -26,3 +26,14 @@ class ModelStatusResponse(BaseModel):
     total_interactions: int
     total_users: int
     total_songs: int
+
+
+class SimilarSongsResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    user_id: str
+    current_song_id: str
+    recommendations: List[SongRecommendation]
+    model_version: str
+    total: int
+    source: Literal["content_based"] = "content_based"

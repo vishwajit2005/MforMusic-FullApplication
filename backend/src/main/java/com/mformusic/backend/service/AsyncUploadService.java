@@ -11,6 +11,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import org.springframework.beans.factory.annotation.Qualifier;
 
 /**
  * Separate Spring bean for @Async + @Transactional — this is necessary because
@@ -33,6 +36,10 @@ public class AsyncUploadService {
 
     @Autowired
     private org.springframework.web.client.RestTemplate restTemplate;
+
+    @Autowired
+    @Qualifier("taskExecutor")
+    private Executor taskExecutor;
 
     @org.springframework.beans.factory.annotation.Value("${mlops.fastapi.url:http://localhost:8000}")
     private String fastApiBaseUrl;
@@ -66,9 +73,7 @@ public class AsyncUploadService {
                 log.info("[BG-Upload] ✅ Upload complete for: {}", song.getTitle());
 
                 // Trigger audio feature extraction in FastAPI MLOps for content model growth
-                if (fastApiEnabled) {
-                    triggerFeatureExtraction(song, cloudUrl);
-                }
+                triggerFeatureExtraction(song, cloudUrl);
             } else {
                 log.warn("[BG-Upload] Upload returned null URL for: {}", song.getTitle());
                 song.setStoredInS3(Boolean.FALSE);
@@ -85,10 +90,23 @@ public class AsyncUploadService {
      * for organic growth of the content-based recommendation model.
      */
     private void triggerFeatureExtraction(Song song, String audioUrl) {
+        String songId = song.getExternalTrackId();
+        if (!fastApiEnabled || fastApiBaseUrl == null || fastApiBaseUrl.isBlank()) {
+            log.debug("[ContentModel] Feature extraction skipped for song={}: FastAPI disabled or URL missing",
+                    songId);
+            return;
+        }
+        if (audioUrl == null || audioUrl.isBlank()) {
+            log.debug("[ContentModel] Feature extraction skipped for song={}: upload URL missing",
+                    songId);
+            return;
+        }
+
         try {
-            String targetUrl = fastApiBaseUrl + "/api/v1/content/queue-feature-extraction";
+            String targetUrl = fastApiBaseUrl.strip().replaceAll("/+$", "")
+                    + "/api/v1/content/queue-feature-extraction";
             java.util.Map<String, Object> payload = new java.util.HashMap<>();
-            payload.put("song_id", song.getExternalTrackId());
+            payload.put("song_id", songId);
             payload.put("audio_url", audioUrl);
             payload.put("title", song.getTitle());
             payload.put("artist_name", song.getArtistName());
@@ -100,10 +118,28 @@ public class AsyncUploadService {
             org.springframework.http.HttpEntity<java.util.Map<String, Object>> request =
                     new org.springframework.http.HttpEntity<>(payload, headers);
 
-            restTemplate.postForEntity(targetUrl, request, Void.class);
-            log.info("[ContentModel] Dispatched feature extraction to FastAPI for song={}", song.getExternalTrackId());
+            // Submit separately: an @Async call within this bean would bypass
+            // Spring's proxy. Never wait for this future or retry the request.
+            CompletableFuture.runAsync(() -> {
+                try {
+                    var response = restTemplate.postForEntity(targetUrl, request, Void.class);
+                    if (!response.getStatusCode().is2xxSuccessful()) {
+                        log.warn("[ContentModel] Feature extraction rejected for song={}: HTTP {}",
+                                songId, response.getStatusCode().value());
+                        return;
+                    }
+                    log.info("[ContentModel] Feature extraction acknowledged for song={}, target={}, status={}",
+                            songId, targetUrl, response.getStatusCode().value());
+                } catch (Exception e) {
+                    log.warn("[ContentModel] Failed to queue feature extraction for song={}: {}",
+                            songId, e.getMessage());
+                }
+            }, taskExecutor);
+            log.info("[ContentModel] Triggering content feature extraction asynchronously for song={}, target={}",
+                    songId, targetUrl);
         } catch (Exception e) {
-            log.warn("[ContentModel] Failed to queue feature extraction for song {}: {}", song.getExternalTrackId(), e.getMessage());
+            log.warn("[ContentModel] Failed to dispatch feature extraction for song={}: {}",
+                    songId, e.getMessage());
         }
     }
 

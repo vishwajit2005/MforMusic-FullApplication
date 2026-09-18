@@ -29,6 +29,7 @@ public class RecommendationService {
     private final SongRepository songRepository;
     private final LikedSongRepository likedSongRepository;
     private final RestTemplate restTemplate;
+    private final ExternalMusicService externalMusicService;
 
     @Value("${mlops.fastapi.url:http://localhost:8000}")
     private String fastApiBaseUrl;
@@ -40,9 +41,8 @@ public class RecommendationService {
      * Fetches personalised recommendations for [userId] from the FastAPI MLOps
      * service and enriches each song_id with full metadata from MySQL.
      *
-     * <p>Songs not found in MySQL (e.g. evicted from S3 cache) are silently
-     * skipped. Returns an empty list on any error so the client degrades
-     * gracefully to the Home feed.
+     * <p>Missing metadata is batch-resolved by exact external ID and cached without
+     * recording a play. Individual lookup failures preserve the remaining results.
      *
      * @param userId  Long user-id extracted from JWT
      * @param n       Number of recommendations to request from FastAPI
@@ -89,26 +89,61 @@ public class RecommendationService {
                     .map(Song::getId)
                     .collect(Collectors.toSet());
 
-            // ── 4. Batch-fetch and enrich with MySQL metadata ─────────────────────
+            // Resolve metadata independently of whether a recommendation was played before.
+            Map<String, Song> resolved = new java.util.HashMap<>();
+            List<String> missing = new java.util.ArrayList<>();
+            for (String id : scoreByTrackId.keySet()) {
+                Optional<Song> existing = songRepository.findByExternalTrackId(id);
+                if (existing.isPresent()) resolved.put(id, existing.get()); else missing.add(id);
+            }
+            if (!missing.isEmpty()) {
+                try {
+                    // One exact-ID batch request, not one blocking request per result.
+                    for (Map<String, Object> metadata : externalMusicService.getSongsByIds(missing)) {
+                        String id = (String) metadata.get("id");
+                        if (!missing.contains(id) || resolved.containsKey(id)) continue;
+                        try {
+                            Song song = new Song();
+                            song.setExternalTrackId(id);
+                            song.setTitle((String) metadata.get("title"));
+                            song.setArtistName((String) metadata.get("artistName"));
+                            song.setThumbnailUrl((String) metadata.get("thumbnailUrl"));
+                            song.setDurationInSeconds(((Number) metadata.get("duration")).intValue());
+                            song.setSaavnUrl((String) metadata.get("audioUrl"));
+                            if (song.getTitle() == null || song.getSaavnUrl() == null || song.getSaavnUrl().isBlank()) {
+                                throw new IllegalArgumentException("Missing playable song metadata");
+                            }
+                            // Metadata cache only: no play count, timestamp, upload or history event.
+                            song.setPlayCount(0);
+                            song.setStoredInS3(false);
+                            song.setLastPlayedAt(null);
+                            try {
+                                song = songRepository.saveAndFlush(song);
+                            } catch (org.springframework.dao.DataIntegrityViolationException duplicate) {
+                                // Another request may have inserted the same unique external ID.
+                                // Repository calls own their transactions; the failed insert is rolled back.
+                                song = songRepository.findByExternalTrackId(id).orElseThrow(() -> duplicate);
+                            }
+                            resolved.put(id, song);
+                        } catch (Exception e) {
+                            log.warn("Could not cache recommendation metadata for song {}: {}", id, e.getMessage());
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("External recommendation metadata lookup failed: {}", e.getMessage());
+                }
+                for (String id : missing) {
+                    if (!resolved.containsKey(id)) log.warn("Recommended song {} could not be resolved — skipping.", id);
+                }
+            }
             Set<String> seenTrackIds = new HashSet<>();
             List<Song> enriched = recs.stream()
-                    .map(rec -> {
-                        Optional<Song> opt = songRepository.findByExternalTrackId(rec.getSongId());
-                        if (opt.isEmpty()) {
-                            log.debug("Recommended song {} not in DB — skipping.", rec.getSongId());
-                            return null;
-                        }
-                        Song song = opt.get();
-                        // Mark liked flag (transient — not persisted)
-                        song.setLiked(likedIds.contains(song.getId()));
-                        return song;
-                    })
+                    .map(rec -> resolved.get(rec.getSongId()))
                     .filter(Objects::nonNull)
                     .filter(song -> seenTrackIds.add(song.getExternalTrackId()))
-                    // Preserve CF ranking by sorting on score descending
+                    .peek(song -> song.setLiked(likedIds.contains(song.getId())))
                     .sorted(Comparator.comparingDouble(
-                            s -> -scoreByTrackId.getOrDefault(s.getExternalTrackId(), 0.0)
-                    ))
+                            song -> -scoreByTrackId.getOrDefault(song.getExternalTrackId(), 0.0)))
                     .collect(Collectors.toList());
 
             log.info("Enriched {}/{} recommended tracks for user={}",

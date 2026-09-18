@@ -16,6 +16,7 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.List;
+import jakarta.servlet.DispatcherType;
 
 @Configuration
 @EnableWebSecurity
@@ -32,6 +33,8 @@ public class SecurityConfig {
             .sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                // Preserve validation/error status on internal servlet error dispatches.
+                .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                 // Public: register / login
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 // Public: telemetry — allows events even from clients with expired JWTs

@@ -1,5 +1,5 @@
 {
-  "purpose": "Serving artifacts copied unchanged; no model retraining performed.",
+  "purpose": "Deployment snapshot: verified content_knn_v2_1416s model; explainability artifacts unchanged.",
   "runtime_versions": {
     "scikit-learn": "1.9.0",
     "xgboost": "3.4.1",
@@ -8,8 +8,8 @@
   },
   "files": {
     "app/data/content_model/combined_features.csv": {
-      "bytes": 1901575,
-      "sha256": "3d00641d2b0be652d8cadd2253c6c429531df31fe72671159701ad7662014fea"
+      "bytes": 1907883,
+      "sha256": "b5a4232f9994581329a20b867a72f372ab5e8f2c0f9e23a78442edde603e8835"
     },
     "app/data/content_model/decade_encoder.joblib": {
       "bytes": 1026,
@@ -20,16 +20,16 @@
       "sha256": "d2d0f6ec50a9ab93cdcdb4f99db9fc55a6d500727cdac22c18cc660a5225f308"
     },
     "app/data/content_model/nn_model.joblib": {
-      "bytes": 525472,
-      "sha256": "c399c6c2b1603c351ca965b32c680151fc253c4fa90b1a8bd116af3c28cc09f5"
+      "bytes": 527332,
+      "sha256": "a960fd749bc158f7756c970ba19357e6c53403d99d03c8f88c746ff0b43393e0"
     },
     "app/data/content_model/scaler.joblib": {
       "bytes": 2079,
       "sha256": "e4d9875878fc656b9d83bb768ac9f07f38055bf7c29aa8425f6e7ffed0302036"
     },
     "app/data/content_model/track_index.csv": {
-      "bytes": 207838,
-      "sha256": "0144f28d61f5cd80357e52ef57078af69064fff1df5820048ac5aed2537714df"
+      "bytes": 208214,
+      "sha256": "a3f7c8ca52049d3441fcc4f406f53c844a4c0d263b33d68bb056bb57710ec618"
     },
     "app/explainability/artifacts/feature_list.joblib": {
       "bytes": 280,
@@ -50,6 +50,10 @@
     "app/explainability/artifacts/surrogate_model.joblib": {
       "bytes": 243465,
       "sha256": "564990037a38dd226d413886317871fe48092bb593d25282670ba2a4e114643f"
+    },
+    "app/data/content_model/model_version.txt": {
+      "bytes": 21,
+      "sha256": "04ad8bb8e10004f2187f4cd2ebbb1cf552aae5958ae13330a0ada833829ca0f0"
     }
   }
 }
