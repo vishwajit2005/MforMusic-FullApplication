@@ -58,4 +58,22 @@ class RecommendationMetadataTest {
     @Test void externalFailurePreservesCachedResults(){offline=true;database.put("cached",song("cached",1L));expect("["+rec("new",.9)+","+rec("cached",.8)+"]");assertEquals("cached",service().getRecommendations(1L,20).get(0).getExternalTrackId());}
     @Test void duplicateInsertUsesWinnerWithoutResettingItsPlayCount(){race=true;expect("["+rec("new",.8)+"]");var result=service().getRecommendations(1L,20);assertSame(winner,result.get(0));assertEquals(12,result.get(0).getPlayCount());assertTrue(saved.isEmpty());}
     @Test void totalFailureIsGracefullyEmpty(){offline=true;expect("["+rec("new",.8)+"]");assertTrue(service().getRecommendations(1L,20).isEmpty());}
+
+    @Test void startupFailureKeepsEmptyBodyButReportsUnavailable() {
+        server.expect(requestTo("http://mlops.test/api/v1/recommendations/1?n=20"))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.BAD_GATEWAY));
+        var result = service().getRecommendationResult(1L,20);
+        assertTrue(result.songs().isEmpty());
+        assertEquals("unavailable",result.status());
+        server.verify();
+    }
+    @Test void genuineEmptyHistoryIsNotAnOutage() {
+        expect("[]");
+        var result = service().getRecommendationResult(1L,20);
+        assertTrue(result.songs().isEmpty()); assertEquals("empty",result.status());
+    }
+    @Test void metadataOutageIsNotMistakenForEmptyHistory() {
+        offline=true; expect("["+rec("new",.8)+"]");
+        assertEquals("unavailable",service().getRecommendationResult(1L,20).status());
+    }
 }

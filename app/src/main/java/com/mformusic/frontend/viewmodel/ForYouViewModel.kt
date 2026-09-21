@@ -11,6 +11,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import com.mformusic.frontend.network.RecommendationRecovery
 
 /** States for the "For You" personalised feed */
 sealed interface ForYouUiState {
@@ -30,6 +33,10 @@ class ForYouViewModel(application: Application) : AndroidViewModel(application) 
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
+    private var fetchJob: Job? = null
+    private val _waitingForService = MutableStateFlow(false)
+    val waitingForService = _waitingForService.asStateFlow()
+
     private val api = RetrofitClient.musicApiService
 
     init {
@@ -37,13 +44,17 @@ class ForYouViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun fetchRecommendations(n: Int = 20) {
-        viewModelScope.launch {
+        if (fetchJob?.isActive == true) return
+        fetchJob = viewModelScope.launch {
+            _waitingForService.value = false
             _isRefreshing.value = true
             if (_uiState.value !is ForYouUiState.Success) {
                 _uiState.value = ForYouUiState.Loading
             }
             try {
-                val response = api.getRecommendations(n)
+                val response = RecommendationRecovery.load(
+                    onWaiting = { _waitingForService.value = true }
+                ) { api.getRecommendations(n) }
                 if (response.isSuccessful) {
                     val rawSongs = response.body() ?: emptyList()
                     val songs = rawSongs.distinctBy { it.externalTrackId ?: it.id.toString() }
@@ -55,10 +66,13 @@ class ForYouViewModel(application: Application) : AndroidViewModel(application) 
                 } else {
                     _uiState.value = ForYouUiState.Error("Unable to load recommendations (${response.code()})")
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _uiState.value = ForYouUiState.Error("Could not connect to server")
+                _uiState.value = ForYouUiState.Error("Recommendations are temporarily unavailable. Please retry shortly.")
             } finally {
                 _isRefreshing.value = false
+                _waitingForService.value = false
             }
         }
     }

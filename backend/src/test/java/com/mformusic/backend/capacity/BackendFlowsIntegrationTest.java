@@ -99,15 +99,18 @@ class BackendFlowsIntegrationTest {
         stub.fastapiMode="refused";
         var response=send("GET","/api/v1/recommendations?n=20","");
         assertEquals(200,response.statusCode()); assertEquals(0,json.readTree(response.body()).size());
+        assertEquals("unavailable",response.headers().firstValue("X-Recommendation-Status").orElseThrow());
     }
     @Test void recommendationsHttp500Returns200AndEmptyList() throws Exception {
         stub.fastapiMode="500";
         var response=send("GET","/api/v1/recommendations?n=20","");
         assertEquals(200,response.statusCode()); assertEquals(0,json.readTree(response.body()).size());
+        assertEquals("unavailable",response.headers().firstValue("X-Recommendation-Status").orElseThrow());
     }
     @Test void recommendationsEnrichRankAndClampCount() throws Exception {
         var response=send("GET","/api/v1/recommendations?n=3","");
         assertEquals(200,response.statusCode()); var rows=json.readTree(response.body());
+        assertEquals("ready",response.headers().firstValue("X-Recommendation-Status").orElseThrow());
         assertEquals(3,rows.size()); assertEquals("load-000001",rows.get(0).get("externalTrackId").asText());
         assertEquals(1,json.readTree(send("GET","/api/v1/recommendations?n=0","").body()).size());
     }

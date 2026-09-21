@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import com.mformusic.frontend.network.RecommendationRecovery
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.map
@@ -31,6 +32,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     data class SimilarSongsState(
         val loading: Boolean = false,
+        val waitingForService: Boolean = false,
         val songs: List<SongResponse> = emptyList(),
         val error: String? = null,
         val playingId: String? = null
@@ -47,7 +49,12 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 val context = PlayerManager.recentContextFor(id)
                 if (currentTrack.value?.externalTrackId != id) return@launch
-                val response = api.getSimilarSongs(id, context)
+                val response = RecommendationRecovery.load(
+                    onWaiting = {
+                        if (currentTrack.value?.externalTrackId == id)
+                            _similarSongs.value = SimilarSongsState(loading = true, waitingForService = true)
+                    }
+                ) { api.getSimilarSongs(id, context) }
                 if (currentTrack.value?.externalTrackId != id) return@launch
                 _similarSongs.value = if (response.isSuccessful) {
                     SimilarSongsState(songs = response.body().orEmpty())
@@ -56,7 +63,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 throw e
             } catch (e: Exception) {
                 if (currentTrack.value?.externalTrackId == id) {
-                    _similarSongs.value = SimilarSongsState(error = "Couldn't connect. Please try again.")
+                    _similarSongs.value = SimilarSongsState(error = "Recommendations are temporarily unavailable. Please retry shortly.")
                 }
             }
         }

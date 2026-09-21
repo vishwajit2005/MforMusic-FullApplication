@@ -67,10 +67,12 @@ public class RecommendationController {
         Long userId = principal.userId();
 
         log.info("Recommendation request: user={}, n={}", userId, clampedN);
-        List<Song> recommendations = recommendationService.getRecommendations(userId, clampedN);
+        var result = recommendationService.getRecommendationResult(userId, clampedN);
 
-        // Return 200 with [] if FastAPI is disabled or the user is in cold-start.
-        // The Android client handles empty lists by showing the Home feed instead.
-        return ResponseEntity.ok(recommendations);
+        // Keep HTTP 200/[] compatibility, but let clients distinguish an outage
+        // from a successful empty result instead of claiming the user lacks history.
+        return ResponseEntity.ok()
+                .header("X-Recommendation-Status", result.status())
+                .body(result.songs());
     }
 }

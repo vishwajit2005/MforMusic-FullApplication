@@ -11,7 +11,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.HashSet;
@@ -37,6 +36,8 @@ public class RecommendationService {
     @Value("${mlops.fastapi.enabled:false}")
     private boolean fastApiEnabled;
 
+    public record Result(List<Song> songs, String status) {}
+
     /**
      * Fetches personalised recommendations for [userId] from the FastAPI MLOps
      * service and enriches each song_id with full metadata from MySQL.
@@ -47,10 +48,15 @@ public class RecommendationService {
      * @param userId  Long user-id extracted from JWT
      * @param n       Number of recommendations to request from FastAPI
      */
+    // Preserve the existing graceful-empty contract for internal/older callers.
     public List<Song> getRecommendations(Long userId, int n) {
+        return getRecommendationResult(userId, n).songs();
+    }
+
+    public Result getRecommendationResult(Long userId, int n) {
         if (!fastApiEnabled) {
             log.info("FastAPI disabled (mlops.fastapi.enabled=false) — returning empty recommendation list.");
-            return Collections.emptyList();
+            return new Result(List.of(), "unavailable");
         }
 
         try {
@@ -61,15 +67,14 @@ public class RecommendationService {
 
             if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
                 log.warn("FastAPI returned non-2xx for user {}: {}", userId, response.getStatusCode());
-                return Collections.emptyList();
+                return new Result(List.of(), "unavailable");
             }
 
             FastApiRecommendationDto body = response.getBody();
             List<FastApiRecommendationDto.FastApiSongRec> recs = body.getRecommendations();
 
-            if (recs == null || recs.isEmpty()) {
-                return Collections.emptyList();
-            }
+            if (recs == null) return new Result(List.of(), "unavailable");
+            if (recs.isEmpty()) return new Result(List.of(), "empty");
 
             log.info("FastAPI recommendations for user={}: {} tracks (source={}, model={})",
                     userId, recs.size(), body.getSource(), body.getModelVersion());
@@ -149,12 +154,12 @@ public class RecommendationService {
             log.info("Enriched {}/{} recommended tracks for user={}",
                     enriched.size(), recs.size(), userId);
 
-            return enriched;
+            return new Result(enriched, enriched.isEmpty() ? "unavailable" : "ready");
 
         } catch (Exception e) {
             log.warn("Failed to fetch recommendations from FastAPI (user={}, url={}): {}",
-                    userId, fastApiBaseUrl, e.getMessage());
-            return Collections.emptyList();
+                    userId, fastApiBaseUrl, e.getClass().getSimpleName());
+            return new Result(List.of(), "unavailable");
         }
     }
 }

@@ -50,6 +50,7 @@ fun ForYouScreen(
     val currentTrack by playerViewModel.currentTrack.collectAsStateWithLifecycle()
     val isPlaying by playerViewModel.isPlaying.collectAsStateWithLifecycle()
     val uiState by forYouViewModel.uiState.collectAsStateWithLifecycle()
+    val waitingForService by forYouViewModel.waitingForService.collectAsStateWithLifecycle()
     val isRefreshing by forYouViewModel.isRefreshing.collectAsStateWithLifecycle()
 
     PullToRefreshBox(
@@ -82,7 +83,7 @@ fun ForYouScreen(
             when (val state = displayedState) {
                 is ForYouUiState.Loading -> {
                     item {
-                        Text("Finding your next favourite…", color = TextSecondary,
+                        Text(if (waitingForService) "Recommendations are waking up. Retrying automatically…" else "Finding your next favourite…", color = TextSecondary,
                             modifier = Modifier.padding(20.dp).semantics { liveRegion = LiveRegionMode.Polite })
                     }
                     items(6) {
