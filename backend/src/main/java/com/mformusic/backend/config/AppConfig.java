@@ -5,11 +5,14 @@ import org.springframework.beans.factory.annotation.Value;
 import java.net.URI;
 import java.util.Objects;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.client.RestTemplate;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.concurrent.Executor;
 
+@Slf4j
 @Configuration
 public class AppConfig {
 
@@ -17,7 +20,16 @@ public class AppConfig {
     public RestTemplate restTemplate(
             @Value("${mlops.fastapi.url:http://localhost:8000}") String mlopsUrl,
             @Value("${MLOPS_API_KEY:}") String mlopsApiKey) {
-        RestTemplate client = new RestTemplate();
+
+        // Explicit timeouts — critical for Render free-tier where MLOps can take
+        // ~30s to wake from sleep. Without these, the default factory has no timeout
+        // and hangs the backend thread indefinitely before failing silently.
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(10_000);  // 10s to establish TCP connection
+        factory.setReadTimeout(55_000);     // 55s to receive first byte (covers cold-start)
+
+        RestTemplate client = new RestTemplate(factory);
+
         if (!mlopsApiKey.isBlank()) {
             URI target = URI.create(mlopsUrl);
             String prefix = target.getPath().replaceAll("/+$", "") + "/";
@@ -31,6 +43,9 @@ public class AppConfig {
                 }
                 return execution.execute(request, body);
             });
+            log.info("MLOps RestTemplate configured → {} (API key present)", mlopsUrl);
+        } else {
+            log.warn("MLOPS_API_KEY is blank — requests to {} will be rejected with 401 by ServiceAuth", mlopsUrl);
         }
         return client;
     }
