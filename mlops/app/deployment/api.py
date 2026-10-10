@@ -7,8 +7,8 @@ from app.deployment.auth import ServiceAuth
 
 class RemoteEncoder:
     def __init__(self):
-        self.url = os.environ["EMBEDDING_SERVICE_URL"].rstrip("/")
-        self.key = os.environ["MLOPS_API_KEY"]
+        self.url = os.environ.get("EMBEDDING_SERVICE_URL", "https://mformusic-embeddings.onrender.com").rstrip("/")
+        self.key = os.environ.get("MLOPS_API_KEY", "")
         if not self.url.startswith("https://") and os.environ.get("DEPLOYMENT_LOCAL_TEST") != "1":
             raise RuntimeError("Embedding service requires HTTPS")
 

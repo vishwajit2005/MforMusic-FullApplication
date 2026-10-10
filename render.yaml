@@ -91,7 +91,7 @@ services:
   - key: MYSQL_URL
     sync: false
   - key: EMBEDDING_SERVICE_URL
-    sync: false
+    value: https://mformusic-embeddings.onrender.com
   - key: KAFKA_BOOTSTRAP_SERVERS
     value: ''
 - type: web
