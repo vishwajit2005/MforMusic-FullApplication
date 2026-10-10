@@ -36,6 +36,10 @@ COPY --from=builder /build/target/*.jar app.jar
 # Render passes PORT via environment variable; default 8080
 EXPOSE 8080
 
+# Default to the 'docker' Spring profile so logback emits structured JSON
+# even in local Docker runs. Render overrides this with SPRING_PROFILES_ACTIVE=prod.
+ENV SPRING_PROFILES_ACTIVE=docker
+
 # JVM tuning for containerized environments:
 #   -XX:+UseContainerSupport  — respect cgroup memory limits
 #   -XX:MaxRAMPercentage=75.0 — leave 25% for OS/JVM overhead

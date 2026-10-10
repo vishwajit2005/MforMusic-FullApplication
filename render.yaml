@@ -1,5 +1,50 @@
 services:
 - type: web
+  name: mformusic-backend
+  runtime: docker
+  # Build the Spring Boot JAR from the backend/ sub-directory of the monorepo.
+  dockerContext: backend
+  dockerfilePath: backend/Dockerfile
+  plan: free
+  region: singapore
+  repo: https://github.com/vishwajit2005/MforMusic-FullApplication
+  branch: main
+  healthCheckPath: /actuator/health
+  envVars:
+  # ── Fix 2: activate prod Spring profile so logback emits structured JSON ──
+  - key: SPRING_PROFILES_ACTIVE
+    value: prod
+  # ── Fix 1: point backend at the deployed MLOps service, not localhost ─────
+  - key: MLOPS_FASTAPI_ENABLED
+    value: 'true'
+  - key: MLOPS_FASTAPI_URL
+    value: https://mformusic-mlops.onrender.com
+  - key: MLOPS_API_KEY
+    sync: false          # set in Render dashboard — must match mformusic-mlops
+  # Kafka is not available on Render free tier; use direct HTTP fallback
+  - key: KAFKA_TELEMETRY_ENABLED
+    value: 'false'
+  # ── Aiven MySQL credentials (set in Render dashboard, never in Git) ───────
+  - key: DB_HOST
+    sync: false
+  - key: DB_PORT
+    sync: false
+  - key: DB_NAME
+    sync: false
+  - key: DB_USER
+    sync: false
+  - key: DB_PASSWORD
+    sync: false
+  # ── Auth / Storage secrets ────────────────────────────────────────────────
+  - key: JWT_SECRET
+    sync: false
+  - key: SUPABASE_URL
+    sync: false
+  - key: SUPABASE_ANON_KEY
+    sync: false
+  - key: SUPABASE_BUCKET
+    value: tracks
+- type: web
   name: mformusic-embeddings
   runtime: python
   plan: free
