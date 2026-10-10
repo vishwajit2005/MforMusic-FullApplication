@@ -26,7 +26,10 @@
         <logger name="com.mformusic" level="DEBUG"/>
     </springProfile>
 
-    <!-- ── Production / Docker: structured JSON ──────────────────────────── -->
+    <!-- ── Production / Docker: structured JSON to stdout only ─────────────
+         Render and Docker both capture stdout — no file appender needed.
+         /var/log/mformusic does not exist in ephemeral containers and the
+         non-root user cannot create it, which crashes the app on startup. -->
     <springProfile name="prod,docker">
         <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
             <encoder class="net.logstash.logback.encoder.LogstashEncoder">
@@ -39,23 +42,8 @@
             </encoder>
         </appender>
 
-        <!-- Rolling file backup (7 days, 500 MB max per file) -->
-        <appender name="JSON_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-            <file>/var/log/mformusic/backend.log</file>
-            <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-                <fileNamePattern>/var/log/mformusic/backend.%d{yyyy-MM-dd}.log.gz</fileNamePattern>
-                <maxHistory>7</maxHistory>
-                <totalSizeCap>2GB</totalSizeCap>
-            </rollingPolicy>
-            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-                <customFields>{"service":"${APP_NAME}"}</customFields>
-                <includeMdc>true</includeMdc>
-            </encoder>
-        </appender>
-
         <root level="INFO">
             <appender-ref ref="JSON_CONSOLE"/>
-            <appender-ref ref="JSON_FILE"/>
         </root>
         <!-- Noisy framework loggers silenced in prod -->
         <logger name="org.hibernate.SQL" level="WARN"/>
