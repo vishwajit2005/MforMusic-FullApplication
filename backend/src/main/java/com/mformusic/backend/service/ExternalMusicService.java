@@ -68,14 +68,52 @@ public class ExternalMusicService {
         return searchMultipleSongs(query, SEARCH_FETCH_LIMIT);
     }
 
+    /** JioSaavn returns about 10 songs per page regardless of the requested limit. */
+    private static final int SAAVN_PAGE_SIZE = 10;
+    private static final java.util.concurrent.ExecutorService SEARCH_POOL =
+            java.util.concurrent.Executors.newFixedThreadPool(8, r -> {
+                Thread t = new Thread(r, "saavn-search");
+                t.setDaemon(true);
+                return t;
+            });
+
     /**
      * Search JioSaavn and return up to [limit] matches in JioSaavn's order.
+     * Fetches ceil(limit / 10) pages in parallel and merges them (duplicates removed),
+     * because the upstream API caps each page at ~10 results.
      */
     public List<Map<String, Object>> searchMultipleSongs(String query, int limit) {
+        int pages = Math.max(1, (limit + SAAVN_PAGE_SIZE - 1) / SAAVN_PAGE_SIZE);
+        List<java.util.concurrent.CompletableFuture<List<Map<String, Object>>>> futures = new ArrayList<>();
+        for (int page = 0; page < pages; page++) {
+            final int p = page;
+            futures.add(pages == 1
+                    ? java.util.concurrent.CompletableFuture.completedFuture(fetchSearchPage(query, p))
+                    : java.util.concurrent.CompletableFuture.supplyAsync(() -> fetchSearchPage(query, p), SEARCH_POOL));
+        }
+        List<Map<String, Object>> output = new ArrayList<>();
+        java.util.Set<Object> seen = new java.util.HashSet<>();
+        for (var future : futures) {
+            List<Map<String, Object>> pageResults;
+            try {
+                pageResults = future.get(20, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (Exception e) {
+                log.warn("JioSaavn search page failed: {}", e.getMessage());
+                continue;
+            }
+            for (Map<String, Object> song : pageResults) {
+                if (output.size() >= limit) break;
+                if (seen.add(song.get("id"))) output.add(song);
+            }
+        }
+        return output;
+    }
+
+    private List<Map<String, Object>> fetchSearchPage(String query, int page) {
         List<Map<String, Object>> output = new ArrayList<>();
         java.net.URI url = org.springframework.web.util.UriComponentsBuilder.fromUriString(SAAVN_SEARCH_URL)
-                .queryParam("page", 0)
-                .queryParam("limit", limit)
+                .queryParam("page", page)
+                .queryParam("limit", SAAVN_PAGE_SIZE)
                 .queryParam("query", query)   // kept last: existing test harness parses the query tail
                 .build().encode().toUri();
 
@@ -94,18 +132,14 @@ public class ExternalMusicService {
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> results = (List<Map<String, Object>>) data.get("results");
 
-            if (results == null || results.isEmpty()) return output;
-
-            int max = Math.min(results.size(), limit);
-            for (int i = 0; i < max; i++) {
-                Map<String, Object> songData = extractSongData(results.get(i));
+            if (results == null) return output;
+            for (Map<String, Object> item : results) {
+                Map<String, Object> songData = extractSongData(item);
                 if (songData != null) output.add(songData);
             }
-
         } catch (Exception e) {
-            log.error("JioSaavn API call failed: {}", e.getMessage());
+            log.error("JioSaavn API call failed (page {}): {}", page, e.getMessage());
         }
-
         return output;
     }
 
