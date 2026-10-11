@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.mformusic.frontend.model.SongResponse
 import com.mformusic.frontend.network.PlayerManager
 import com.mformusic.frontend.network.RetrofitClient
+import com.mformusic.frontend.network.playExact
 import com.mformusic.frontend.worker.PredictiveCacheWorker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -84,7 +85,7 @@ class ForYouViewModel(application: Application) : AndroidViewModel(application) 
     fun playSong(song: SongResponse) {
         viewModelScope.launch {
             try {
-                val response = api.playOrCacheSong(song.title)
+                val response = api.playExact(song)
                 if (response.isSuccessful && response.body() != null) {
                     val resolved = response.body()!!
 

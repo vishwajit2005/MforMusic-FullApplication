@@ -194,11 +194,12 @@ class CollaborativeFilterEngine:
         Cold-start fallback: globally most-interacted songs weighted by type.
         Computes directly from the interactions table — no model needed.
         """
+        itype = func.lower(Interaction.interaction_type)
         weight_expr = case(
-            (Interaction.interaction_type == "like", 4.0),
-            (Interaction.interaction_type == "download", 3.5),
-            (Interaction.interaction_type == "playlist_add", 3.0),
-            (Interaction.interaction_type == "play", 1.0),
+            (itype == "like", 4.0),
+            (itype == "download", 3.5),
+            (itype == "playlist_add", 3.0),
+            (itype == "play", 1.0),
             else_=0.1,
         )
 

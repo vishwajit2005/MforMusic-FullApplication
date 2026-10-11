@@ -16,6 +16,8 @@ from app.schemas.interaction import InteractionIngest
 from app.services.cf_engine import cf_engine
 from app.services.content_recommendation_service import content_service
 from app.services.embedding_service import embed_song
+from app.services import embedding_recommender
+from app.services.version_dedup import build_metadata, collapse_versions
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -75,6 +77,53 @@ def ingest_interaction(db: Session, payload: InteractionIngest) -> tuple[Interac
     return interaction, retrain_triggered
 
 
+# ── Post-processing helpers (never change model scores) ──────────────────────
+
+# Candidates fetched per requested slot, so dropping duplicate versions still fills n.
+_OVERFETCH = 3
+_MAX_BLOCKED_FOR_METADATA = 200
+
+
+def _fetch_size(n: int) -> int:
+    return max(n, min(n * _OVERFETCH, n + 40))
+
+
+def _finalize(recs: list[dict], n: int, db: Session, blocked_ids, extra_metadata: dict | None = None) -> list[dict]:
+    """Collapse multiple versions of the same song, drop versions of blocked songs, trim to n."""
+    if not recs:
+        return []
+    blocked = list(dict.fromkeys(str(b) for b in blocked_ids))[:_MAX_BLOCKED_FOR_METADATA]
+    metadata = build_metadata(
+        [r["song_id"] for r in recs] + blocked,
+        content_service.get_track_metadata,
+        lambda ids: embedding_recommender.stored_metadata(db, ids),
+    )
+    for sid, pair in (extra_metadata or {}).items():
+        metadata.setdefault(str(sid), pair)
+    return collapse_versions(recs, metadata, n, blocked)
+
+
+def _blend(primary: list[dict], secondary: list[dict], secondary_share: float, limit: int) -> list[dict]:
+    """Interleave two ranked lists so roughly `secondary_share` of slots come from `secondary`."""
+    share = min(1.0, max(0.0, secondary_share))
+    out, seen = [], set()
+    p = s = taken_secondary = 0
+    while len(out) < limit and (p < len(primary) or s < len(secondary)):
+        want_secondary = taken_secondary < round((len(out) + 1) * share)
+        if (want_secondary and s < len(secondary)) or p >= len(primary):
+            rec, s = secondary[s], s + 1
+            from_secondary = True
+        else:
+            rec, p = primary[p], p + 1
+            from_secondary = False
+        if rec["song_id"] in seen:
+            continue
+        seen.add(rec["song_id"])
+        taken_secondary += from_secondary
+        out.append(rec)
+    return out
+
+
 def get_recommendations(
     user_id: str,
     db: Session,
@@ -98,6 +147,17 @@ def get_recommendations(
     )
     user_count = len(user_interactions)
     interacted_song_ids = {i.song_id for i in user_interactions}
+    fetch_n = _fetch_size(top_n)
+    # Most-recent-first unique IDs, used to block other versions of songs already heard.
+    recent_interacted_ids = list(dict.fromkeys(i.song_id for i in user_interactions))
+    positive_types = {"like", "play", "download", "playlist_add"}
+    recent_positive_track_ids = list(islice(
+        (
+            i.song_id for i in user_interactions
+            if (i.interaction_type or "").lower() in positive_types
+        ),
+        10,
+    ))
 
     # This controls serving only. Ingestion and scheduled retraining still run
     # independently, even when content recommendations satisfy every request.
@@ -113,7 +173,7 @@ def get_recommendations(
                 else "no_positive_history"
             )
         if tier == "cf" and cf_engine.is_trained and user_count >= settings.MIN_INTERACTIONS_FOR_CF:
-            recs = cf_engine.recommend_for_user(user_id, top_n)
+            recs = _finalize(cf_engine.recommend_for_user(user_id, fetch_n), top_n, db, interacted_song_ids)
             if recs:
                 logger.info(
                     f"[Recs] CF recommendations for user={user_id}: "
@@ -133,21 +193,16 @@ def get_recommendations(
         if tier == "content" and content_service.is_ready and user_interactions:
             # STRICT POSITIVE SIGNALS ONLY: like, play, download, playlist_add
             # Negative signals (skip, unlike) are strictly forbidden from acting as seeds.
-            positive_types = {"like", "play", "download", "playlist_add"}
-            recent_positive_track_ids = list(islice(
-                (
-                    i.song_id for i in user_interactions
-                    if (i.interaction_type or "").lower() in positive_types
-                ),
-                10,
-            ))
-
             if recent_positive_track_ids:
                 content_recs = content_service.get_taste_recommendations(
                     recent_positive_track_ids=recent_positive_track_ids,
-                    n=top_n,
+                    n=fetch_n,
                     exclude_ids=interacted_song_ids,
                 )
+                content_recs = _blend_unknown_seeds(
+                    db, content_recs, recent_positive_track_ids, fetch_n, interacted_song_ids,
+                )
+                content_recs = _finalize(content_recs, top_n, db, recent_interacted_ids)
                 if not content_recs and diagnostics is not None:
                     # An empty query can also mean exhausted candidates or a
                     # query failure; only mark coverage when no seed matches.
@@ -170,12 +225,31 @@ def get_recommendations(
                         "source": "content_based",
                     }
 
+    # ── Tier 2.5: title+artist embeddings (songs outside the audio catalog) ───
+    if recent_positive_track_ids:
+        weights = [10 - rank for rank in range(len(recent_positive_track_ids))]
+        emb_recs = _finalize(
+            embedding_recommender.taste_recommendations(
+                db, recent_positive_track_ids, weights, fetch_n, interacted_song_ids,
+            ),
+            top_n, db, recent_interacted_ids,
+        )
+        if emb_recs:
+            logger.info(f"[Recs] Embedding-based recommendations for user={user_id}: {len(emb_recs)} tracks")
+            return {
+                "user_id": user_id,
+                "recommendations": emb_recs,
+                "model_version": "title_artist_minilm",
+                "total": len(emb_recs),
+                "source": "embedding_based",
+            }
+
     # ── Tier 3: Popular Songs Fallback ────────────────────────────────────────
     logger.info(
         f"[Recs] Cold start fallback to popular songs for user={user_id} "
         f"(interactions={user_count}, cf_trained={cf_engine.is_trained}, content_ready={content_service.is_ready})."
     )
-    songs = cf_engine.get_popular_songs(db, top_n)
+    songs = _finalize(cf_engine.get_popular_songs(db, fetch_n), top_n, db, recent_interacted_ids)
     return {
         "user_id": user_id,
         "recommendations": songs,
@@ -191,29 +265,74 @@ def get_similar_recommendations(
     context_song_ids: list[str],
     db: Session,
     n: int = 20,
+    current_song_title: str | None = None,
+    current_song_artist: str | None = None,
 ) -> dict:
-    """Now Playing only: exclude complete history, never invoke CF/popular."""
+    """Now Playing only: exclude complete history, never invoke CF/popular.
+
+    If the current song is outside the audio catalog, its title+artist embedding
+    leads the list (so results follow what is actually playing) and the usual
+    context-based audio results fill the remaining slots.
+    """
     # One read serves exclusions, latest-positive quality and recent rejections.
     history = (
         db.query(Interaction).filter(Interaction.user_id == user_id)
         .order_by(Interaction.created_at.desc(), Interaction.id.desc()).all()
     )
     interacted_song_ids = {event.song_id for event in history}
+    fetch_n = _fetch_size(n)
     recommendations = content_service.get_now_playing_recommendations(
         current_track_id=current_song_id,
         context_track_ids=context_song_ids,
-        n=n,
+        n=fetch_n,
         exclude_ids=interacted_song_ids,
         interaction_history=history,
     )
+    source = "content_based"
+    if not content_service.has_track(current_song_id):
+        embedding_recs = embedding_recommender.similar_to_song(
+            db, current_song_id, fetch_n * 2,
+            exclude_ids=set(interacted_song_ids) | set(context_song_ids),
+            title=current_song_title, artist=current_song_artist,
+        )
+        if embedding_recs:
+            recommendations = _blend(recommendations, embedding_recs, 1.0, fetch_n * 3)
+            source = "embedding_based"
+    blocked = [current_song_id] + list(context_song_ids) + list(dict.fromkeys(e.song_id for e in history))
+    # Title/artist sent by the backend lets us block other versions of the song playing now.
+    current_meta = {current_song_id: (current_song_title, current_song_artist)} if current_song_title else None
+    recommendations = _finalize(recommendations, n, db, blocked, current_meta)
     return {
         "user_id": user_id,
         "current_song_id": current_song_id,
         "recommendations": recommendations,
-        "model_version": content_service.model_version,
+        "model_version": content_service.model_version if source == "content_based" else "title_artist_minilm",
         "total": len(recommendations),
-        "source": "content_based",
+        "source": source,
     }
+
+
+def _blend_unknown_seeds(db: Session, content_recs: list[dict], positive_ids: list[str],
+                         fetch_n: int, interacted_song_ids) -> list[dict]:
+    """
+    Songs outside the audio catalog contribute nothing to the KNN taste vector.
+    Give them a share of the list (by their recency weight) via title+artist embeddings.
+    Returns content_recs unchanged when every seed is known or embeddings are unavailable.
+    """
+    try:
+        weights = [10 - rank for rank in range(len(positive_ids))]
+        unknown = [(sid, w) for sid, w in zip(positive_ids, weights) if not content_service.has_track(sid)]
+        if not unknown or not content_recs:
+            return content_recs
+        share = sum(w for _, w in unknown) / sum(weights)
+        exclude = set(interacted_song_ids) | {r["song_id"] for r in content_recs}
+        emb = embedding_recommender.taste_recommendations(
+            db, [sid for sid, _ in unknown], [w for _, w in unknown], fetch_n, exclude,
+        )
+        return _blend(content_recs, emb, share, fetch_n) if emb else content_recs
+    except Exception:
+        logger.warning("Unknown-seed embedding blend failed; using audio model only", exc_info=True)
+        return content_recs
 
 
 # ── Phase 6: embedding upsert ─────────────────────────────────────────────────
