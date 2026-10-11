@@ -33,14 +33,14 @@ class RecommendationRecoveryTest {
         }
         assertEquals(401, result.code())
     }
-    @Test fun persistentServiceFailureStopsAfterFiveAttempts() = runBlocking {
+    @Test fun persistentServiceFailureStopsAfterNineAttempts() = runBlocking {
         var calls = 0
         try {
             RecommendationRecovery.load(pause = {}) {
                 calls++; Response.error<String>(503, "".toResponseBody())
             }
             fail("Must report temporary failure")
-        } catch (_: IOException) { assertEquals(5, calls) }
+        } catch (_: IOException) { assertEquals(9, calls) }
     }
     @Test fun connectionFailureCanRecover() = runBlocking {
         var calls = 0
@@ -57,5 +57,25 @@ class RecommendationRecoveryTest {
             }
             fail("Cancellation must propagate")
         } catch (_: CancellationException) { }
+    }
+
+    @Test fun respectsServerRetryAfter() = runBlocking {
+        var calls = 0
+        val waits = mutableListOf<Long>()
+        RecommendationRecovery.load(pause = { waits.add(it) }) {
+            if (++calls == 1) Response.success("", Headers.headersOf(
+                "X-Recommendation-Status", "unavailable", "Retry-After", "90"))
+            else Response.success("song")
+        }
+        assertEquals(listOf(90_000L), waits)
+    }
+    @Test fun recoversAfterMoreThanTwoMinutesOfStartup() = runBlocking {
+        var elapsed = 0L
+        val result = RecommendationRecovery.load(pause = { elapsed += it }) {
+            if (elapsed < 180_000L) Response.error<String>(503, "".toResponseBody())
+            else Response.success("song")
+        }
+        assertEquals("song",result.body())
+        assertTrue(elapsed >= 180_000L)
     }
 }

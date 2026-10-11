@@ -11,6 +11,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.res.stringResource
+import com.mformusic.frontend.R
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
@@ -93,8 +95,7 @@ fun RegisterScreen(navController: NavController, tokenDataStore: TokenDataStore)
                 Spacer(modifier = Modifier.height(60.dp))
 
                 // Logo
-                Text("M", fontSize = 64.sp, fontWeight = FontWeight.ExtraBold, color = Accent)
-                Text("for Music", fontSize = 18.sp, color = TextSecondary, fontWeight = FontWeight.Medium)
+                Text(stringResource(R.string.app_name), fontSize = 56.sp, fontWeight = FontWeight.ExtraBold, color = Accent)
 
                 Spacer(modifier = Modifier.height(48.dp))
 

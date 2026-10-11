@@ -1,0 +1,15 @@
+# Corrected implementation prompt: empty recommendation feeds
+
+Implement and verify the following locally. Keep all earlier changes. Do not push or deploy to Render. Preserve content-first → CF → popular serving, CF training, semantic search, telemetry event emission, and recommendation scoring.
+
+## 1. Incorporate pending content tracks safely
+Set MIN_NEW_SONGS_FOR_CONTENT_RETRAIN=5 in configuration and local environment; retain the 86,400-second interval. Persist Docker content artifacts in a named volume, backed up before the admin action. Use one local API worker (matching Render) so in-process hot swaps and schedulers cannot leave a second worker serving an old model. Preserve the model version across restarts with small version metadata; do not alter feature transformation, fitting, or scoring. Invoke the existing force-retrain endpoint once. Verify pending rows, catalog count, source, and survival after container recreation. Artifacts must change through training; do not manually edit their contents.
+
+## 2. Resolve For You metadata without dropping new tracks
+Keep local MySQL lookups. Batch-fetch missing IDs through ExternalMusicService's exact-ID endpoint, not title searches or 20 unbounded parallel requests. Validate each track independently, warn and skip unavailable results, and preserve locally resolved tracks when the external service fails. Save metadata-only rows for successful results: playCount=0, lastPlayedAt=null, storedInS3=false, no upload/history/telemetry side effects. Recover safely from concurrent unique-key inserts. Retain liked flags, score order, de-duplication, and graceful total-failure behavior. RecommendationService owns this correction; use existing external/repository infrastructure.
+
+## 3. Restore the immediate listening window across sessions
+Use Android DataStore, keyed by stable account ID, with an ordered JSON list of at most five distinct track IDs (latest/current plus four prior tracks). Filter the current song when deriving up to four context IDs. Persist actual playback starts, not future queue entries. Restore before requesting Similar Songs, serialize updates, and isolate account switches and logout. Use the existing player state rather than modifying PlaybackTelemetryListener or TelemetryRepository. Keep the network request format and recommendation logic unchanged. Test process recreation, account isolation, exclusions, and rapid updates.
+
+## Verification
+Run existing and targeted backend/Python/Android tests as supported by the local environment. Test real authenticated For You before/after; confirm missing metadata persists without being counted as played. Check Similar Songs for the newly incorporated track without artificially injecting a seed. Test persisted context with a fresh DataStore instance and compile/install the debug APK. Clearly distinguish automated, API, and actual emulator evidence. Do not claim a UI test passed when the emulator is unavailable. Supply a combined report with real counts and limitations.

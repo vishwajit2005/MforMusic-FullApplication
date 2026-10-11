@@ -290,7 +290,7 @@ fun FullPlayerScreen(
             }
             if (showSimilar) {
                 if (similar.waitingForService) {
-                    Text("Recommendations are waking up. Retrying automatically…", color = TextSecondary)
+                    Text("Connecting… This may take a few minutes. Retrying automatically…", color = TextSecondary)
                 }
                 Text("Inspired by this song and your recent listening", color = TextSecondary,
                     fontSize = 13.sp, modifier = Modifier.padding(vertical = 12.dp))

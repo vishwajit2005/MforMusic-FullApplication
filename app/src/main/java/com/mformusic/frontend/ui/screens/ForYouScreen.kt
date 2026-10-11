@@ -51,6 +51,7 @@ fun ForYouScreen(
     val isPlaying by playerViewModel.isPlaying.collectAsStateWithLifecycle()
     val uiState by forYouViewModel.uiState.collectAsStateWithLifecycle()
     val waitingForService by forYouViewModel.waitingForService.collectAsStateWithLifecycle()
+    val connectionMessage by forYouViewModel.connectionMessage.collectAsStateWithLifecycle()
     val isRefreshing by forYouViewModel.isRefreshing.collectAsStateWithLifecycle()
 
     PullToRefreshBox(
@@ -79,11 +80,23 @@ fun ForYouScreen(
                 ForYouHeroHeader()
             }
 
+            if (displayedState is ForYouUiState.Success && connectionMessage != null) {
+                item {
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                        Text(connectionMessage.orEmpty(), color = TextSecondary,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                        if (!isRefreshing) TextButton(onClick = { forYouViewModel.fetchRecommendations() }) {
+                            Text("Retry")
+                        }
+                    }
+                }
+            }
+
             // ── Content ──────────────────────────────────────────────────────────
             when (val state = displayedState) {
                 is ForYouUiState.Loading -> {
                     item {
-                        Text(if (waitingForService) "Recommendations are waking up. Retrying automatically…" else "Finding your next favourite…", color = TextSecondary,
+                        Text(if (waitingForService) "Connecting… This may take a few minutes. We’ll retry automatically." else "Finding your next favourite…", color = TextSecondary,
                             modifier = Modifier.padding(20.dp).semantics { liveRegion = LiveRegionMode.Polite })
                     }
                     items(6) {

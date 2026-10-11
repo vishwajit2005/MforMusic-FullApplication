@@ -10,7 +10,7 @@ if len(password) < 16:
     st.error("Dashboard access is not configured.")
     st.stop()
 if not st.session_state.get("monitor_authenticated"):
-    st.title("MforMusic Monitor")
+    st.title("Music Monitor")
     with st.form("monitor_sign_in"):
         entered = st.text_input("Monitor password", type="password")
         submitted = st.form_submit_button("Sign in")

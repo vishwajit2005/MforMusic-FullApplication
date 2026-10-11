@@ -12,7 +12,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import monitor_data as data
 
-st.set_page_config(page_title="MforMusic Monitor", page_icon="♫", layout="wide")
+st.set_page_config(page_title="Music Monitor", page_icon="♫", layout="wide")
 st.markdown("""<style>
 .stApp {background:#101318;color:#edf1f7;}
 [data-testid="stSidebar"] {background:#171c24;}
@@ -41,7 +41,7 @@ with st.sidebar:
     st.divider()
     st.caption("This view reads activity and requests explanations. It does not train models or generate test interactions.")
 
-st.title("MforMusic Monitor")
+st.title("Music Monitor")
 st.write("See recent listening activity, inspect recommendations, and understand the factors behind a score.")
 
 

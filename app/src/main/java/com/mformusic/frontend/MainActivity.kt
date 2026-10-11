@@ -73,4 +73,4 @@ class MainActivity : ComponentActivity() {
         PlayerManager.release()
         TelemetryRepository.stop()
     }
-}
+} 

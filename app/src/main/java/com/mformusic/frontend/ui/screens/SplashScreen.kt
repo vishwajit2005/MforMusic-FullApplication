@@ -3,6 +3,8 @@ package com.mformusic.frontend.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.res.stringResource
+import com.mformusic.frontend.R
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -41,16 +43,10 @@ fun SplashScreen(navController: NavController, tokenDataStore: TokenDataStore) {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                "M",
-                fontSize = 80.sp,
+                stringResource(R.string.app_name),
+                fontSize = 64.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Accent
-            )
-            Text(
-                "for Music",
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Medium,
-                color = Color.White
             )
         }
     }

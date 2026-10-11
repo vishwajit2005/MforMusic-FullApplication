@@ -11,6 +11,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.mformusic.frontend.BuildConfig
+import com.mformusic.frontend.data.RecommendationStore
+import com.mformusic.frontend.data.TokenDataStore
+import com.mformusic.frontend.data.dataStore
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
 import com.mformusic.frontend.network.RecommendationRecovery
@@ -38,42 +43,85 @@ class ForYouViewModel(application: Application) : AndroidViewModel(application) 
     val waitingForService = _waitingForService.asStateFlow()
 
     private val api = RetrofitClient.musicApiService
+    private val tokens = TokenDataStore(application)
+    private val savedFeed = RecommendationStore(application.dataStore, BuildConfig.BASE_URL)
+    private var accountId: Long? = null
+    private val _connectionMessage = MutableStateFlow<String?>(null)
+    val connectionMessage = _connectionMessage.asStateFlow()
 
     init {
-        fetchRecommendations()
+        viewModelScope.launch {
+            tokens.userIdFlow.distinctUntilChanged().collect { id ->
+                fetchJob?.cancel()
+                fetchJob?.join()
+                accountId = id
+                _uiState.value = ForYouUiState.Loading
+                _connectionMessage.value = null
+                if (id != null) fetchRecommendations()
+            }
+        }
     }
 
     fun fetchRecommendations(n: Int = 20) {
+        val userId = accountId ?: return
         if (fetchJob?.isActive == true) return
         fetchJob = viewModelScope.launch {
-            _waitingForService.value = false
+            _waitingForService.value = true
             _isRefreshing.value = true
+            _connectionMessage.value = "Connecting… Updating your recommendations."
             if (_uiState.value !is ForYouUiState.Success) {
                 _uiState.value = ForYouUiState.Loading
             }
             try {
+                if ((_uiState.value as? ForYouUiState.Success)?.songs.isNullOrEmpty()) {
+                    val cached = try { savedFeed.read(userId) }
+                    catch (e: CancellationException) { throw e }
+                    catch (_: Exception) { emptyList() }
+                    if (cached.isNotEmpty()) _uiState.value = ForYouUiState.Success(cached)
+                }
+                if ((_uiState.value as? ForYouUiState.Success)?.songs?.isNotEmpty() == true)
+                    _connectionMessage.value = "Connecting… Showing your last saved recommendations."
                 val response = RecommendationRecovery.load(
                     onWaiting = { _waitingForService.value = true }
                 ) { api.getRecommendations(n) }
                 if (response.isSuccessful) {
                     val rawSongs = response.body() ?: emptyList()
                     val songs = rawSongs.distinctBy { it.externalTrackId ?: it.id.toString() }
-                    _uiState.value = ForYouUiState.Success(songs)
+                    if (songs.isNotEmpty() || (_uiState.value as? ForYouUiState.Success)?.songs.isNullOrEmpty()) {
+                        _uiState.value = ForYouUiState.Success(songs)
+                        _connectionMessage.value = null
+                    } else {
+                        _connectionMessage.value = "No new picks yet. Showing your last saved recommendations."
+                    }
                     // Kick off background pre-caching on WiFi (Phase 5)
                     if (songs.isNotEmpty()) {
+                        try { savedFeed.save(userId, songs) }
+                        catch (e: CancellationException) { throw e }
+                        catch (_: Exception) { /* A disk failure must not hide a successful response. */ }
                         PredictiveCacheWorker.enqueue(getApplication())
                     }
                 } else {
-                    _uiState.value = ForYouUiState.Error("Unable to load recommendations (${response.code()})")
+                    showFailure(if (response.code() in listOf(401, 403))
+                        "Please sign in again to refresh your recommendations."
+                        else "Couldn't refresh recommendations. Please retry.")
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.value = ForYouUiState.Error("Recommendations are temporarily unavailable. Please retry shortly.")
+                showFailure("Couldn't connect. Please retry shortly.")
             } finally {
                 _isRefreshing.value = false
                 _waitingForService.value = false
             }
+        }
+    }
+
+    private fun showFailure(message: String) {
+        if ((_uiState.value as? ForYouUiState.Success)?.songs?.isNotEmpty() == true) {
+            _connectionMessage.value = "$message Showing your last saved recommendations."
+        } else {
+            _connectionMessage.value = null
+            _uiState.value = ForYouUiState.Error(message)
         }
     }
 
