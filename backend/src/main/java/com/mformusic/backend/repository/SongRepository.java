@@ -10,6 +10,7 @@ public interface SongRepository extends JpaRepository<Song, Long> {
     Optional<Song> findByExternalTrackId(String trackId);
     long countByStoredInS3True();
     List<Song> findByTitleContainingIgnoreCase(String title);
+    List<Song> findTop25ByTitleContainingIgnoreCaseOrArtistNameContainingIgnoreCase(String title, String artistName);
     List<Song> findByLastPlayedAtIsNotNullOrderByLastPlayedAtDesc(Pageable pageable);
 
     /**

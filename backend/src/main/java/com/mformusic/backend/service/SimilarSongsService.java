@@ -29,6 +29,11 @@ public class SimilarSongsService {
                     .queryParam("user_id", userId).queryParam("current_song_id", currentId)
                     .queryParam("n", n);
             for (String id : context) uri.queryParam("context_song_ids", id);
+            // Lets MLOps embed title+artist when the song is outside its audio catalog.
+            songs.findByExternalTrackId(currentId).ifPresent(current -> {
+                if (current.getTitle() != null) uri.queryParam("current_song_title", current.getTitle());
+                if (current.getArtistName() != null) uri.queryParam("current_song_artist", current.getArtistName());
+            });
             var body = restTemplate.getForObject(uri.build().encode().toUri(), FastApiRecommendationDto.class);
             if (body == null || body.getRecommendations() == null) return List.of();
             Set<String> excluded = new HashSet<>(context);

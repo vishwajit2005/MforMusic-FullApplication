@@ -6,6 +6,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import com.mformusic.backend.model.Song;
+import com.mformusic.backend.util.SongText;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -15,10 +18,12 @@ public class ExternalMusicService {
 
     private static final Logger log = LoggerFactory.getLogger(ExternalMusicService.class);
 
-    private static final String SAAVN_API_URL =
-            "https://mformusic-api.onrender.com/api/search/songs?query=";
+    private static final String SAAVN_SEARCH_URL = "https://mformusic-api.onrender.com/api/search/songs";
 
-    private static final int MAX_EXTERNAL_RESULTS = 5;
+    /** Results used to pick the single best match for play-by-name. */
+    private static final int BEST_MATCH_POOL = 10;
+    /** Results fetched for the search screen (ranked afterwards by SearchRanker). */
+    public static final int SEARCH_FETCH_LIMIT = 40;
 
     @Autowired
     private RestTemplate restTemplate;
@@ -45,16 +50,34 @@ public class ExternalMusicService {
      * Search JioSaavn and return the single best match (used for play/cache flow).
      */
     public Map<String, Object> searchSongOnSaavn(String songName) {
-        List<Map<String, Object>> results = searchMultipleSongs(songName);
-        return results.isEmpty() ? null : results.get(0);
+        List<Map<String, Object>> results = searchMultipleSongs(songName, BEST_MATCH_POOL);
+        if (results.isEmpty()) return null;
+        // Prefer the closest title match over JioSaavn's raw first result.
+        List<SearchRanker.Candidate> candidates = new ArrayList<>();
+        for (int i = 0; i < results.size(); i++) {
+            candidates.add(new SearchRanker.Candidate(toSong(results.get(i)), i, results.size(), false));
+        }
+        String bestId = SearchRanker.rank(songName, candidates, 1).stream()
+                .findFirst().map(com.mformusic.backend.model.Song::getExternalTrackId).orElse(null);
+        return results.stream().filter(r -> java.util.Objects.equals(r.get("id"), bestId))
+                .findFirst().orElse(results.get(0));
+    }
+
+    /** Backwards-compatible: up to SEARCH_FETCH_LIMIT matches. */
+    public List<Map<String, Object>> searchMultipleSongs(String query) {
+        return searchMultipleSongs(query, SEARCH_FETCH_LIMIT);
     }
 
     /**
-     * Search JioSaavn and return up to MAX_EXTERNAL_RESULTS matches (used for search suggestions).
+     * Search JioSaavn and return up to [limit] matches in JioSaavn's order.
      */
-    public List<Map<String, Object>> searchMultipleSongs(String query) {
+    public List<Map<String, Object>> searchMultipleSongs(String query, int limit) {
         List<Map<String, Object>> output = new ArrayList<>();
-        String url = SAAVN_API_URL + query;
+        java.net.URI url = org.springframework.web.util.UriComponentsBuilder.fromUriString(SAAVN_SEARCH_URL)
+                .queryParam("page", 0)
+                .queryParam("limit", limit)
+                .queryParam("query", query)   // kept last: existing test harness parses the query tail
+                .build().encode().toUri();
 
         try {
             log.info("Fetching from JioSaavn API: {}", url);
@@ -73,8 +96,8 @@ public class ExternalMusicService {
 
             if (results == null || results.isEmpty()) return output;
 
-            int limit = Math.min(results.size(), MAX_EXTERNAL_RESULTS);
-            for (int i = 0; i < limit; i++) {
+            int max = Math.min(results.size(), limit);
+            for (int i = 0; i < max; i++) {
                 Map<String, Object> songData = extractSongData(results.get(i));
                 if (songData != null) output.add(songData);
             }
@@ -84,6 +107,21 @@ public class ExternalMusicService {
         }
 
         return output;
+    }
+
+    /** Map a JioSaavn result (from extractSongData) to an unsaved Song for display/ranking. */
+    public static Song toSong(Map<String, Object> data) {
+        Song song = new Song();
+        song.setExternalTrackId((String) data.get("id"));
+        song.setTitle((String) data.get("title"));
+        song.setArtistName((String) data.get("artistName"));
+        Object duration = data.get("duration");
+        song.setDurationInSeconds(duration instanceof Number n ? n.intValue() : 0);
+        song.setThumbnailUrl((String) data.get("thumbnailUrl"));
+        song.setSaavnUrl((String) data.get("audioUrl"));
+        song.setPlayCount(0);
+        song.setStoredInS3(Boolean.FALSE);
+        return song;
     }
 
     @SuppressWarnings("unchecked")
@@ -105,10 +143,11 @@ public class ExternalMusicService {
             Object durationRaw = item.get("duration");
             int duration = durationRaw instanceof Number ? ((Number) durationRaw).intValue() : 0;
 
+            Object rawTitle = item.getOrDefault("name", "Unknown");
             return Map.of(
                     "id", item.get("id").toString(),
-                    "title", item.getOrDefault("name", "Unknown"),
-                    "artistName", artistName,
+                    "title", SongText.unescape(String.valueOf(rawTitle)),
+                    "artistName", SongText.unescape(artistName),
                     "duration", duration,
                     "audioUrl", audioUrl,
                     "thumbnailUrl", thumbnailUrl

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.mformusic.frontend.model.SongResponse
 import com.mformusic.frontend.network.PlayerManager
 import com.mformusic.frontend.network.RetrofitClient
+import com.mformusic.frontend.network.playExact
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -79,7 +80,7 @@ class SearchViewModel : ViewModel() {
     fun playSong(song: SongResponse) {
         viewModelScope.launch {
             try {
-                val response = api.playOrCacheSong(song.title)
+                val response = api.playExact(song)
                 if (response.isSuccessful && response.body() != null) {
                     val resolvedSong = response.body()!!
                     val resolvedUrl  = resolvedSong.s3Url ?: resolvedSong.saavnUrl
