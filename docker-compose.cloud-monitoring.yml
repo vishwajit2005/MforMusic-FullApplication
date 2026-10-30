@@ -1,0 +1,67 @@
+# Prometheus + Grafana on YOUR machine, monitoring the DEPLOYED MforMusic API (Render).
+# Nothing else from the main stack runs: no local backend, mlops, databases or Kafka.
+#
+#   sh monitoring/scripts/init-monitoring-env.sh                       # once: generates secrets into .env
+#   docker compose -f docker-compose.cloud-monitoring.yml up -d        # start
+#   docker compose -f docker-compose.cloud-monitoring.yml down         # stop (also lets the free Render service sleep)
+#
+# Required in the root .env (the stack refuses to start without them):
+#   CLOUD_METRICS_TOKEN  must equal the METRICS_TOKEN env var set on the mformusic-mlops Render service
+#   GRAFANA_PASSWORD     Grafana admin password
+# Full instructions: monitoring/README.md (section 9).
+#
+# This file uses its own Compose project name and volumes, so it does not clash with the
+# optional `monitoring` profile in docker-compose.yml. Both use ports 9090/3000: run one at a time.
+name: mformusic-cloud-monitoring
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: mformusic-prometheus-cloud
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"   # loopback only: Prometheus' UI has no login
+    environment:
+      CLOUD_METRICS_TOKEN: ${CLOUD_METRICS_TOKEN:?CLOUD_METRICS_TOKEN is not set - run sh monitoring/scripts/init-monitoring-env.sh}
+    volumes:
+      - ./monitoring/prometheus.cloud.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_cloud_data:/prometheus
+    # The scrape token is written to an in-memory tmpfs at start-up (never to a volume or into git).
+    tmpfs:
+      - /run/metrics:mode=1777
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        umask 077
+        printf '%s' "$$CLOUD_METRICS_TOKEN" > /run/metrics/token
+        exec /bin/prometheus \
+          --config.file=/etc/prometheus/prometheus.yml \
+          --storage.tsdb.path=/prometheus \
+          --storage.tsdb.retention.time=15d
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: mformusic-grafana-cloud
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    ports:
+      - "127.0.0.1:3000:3000"   # loopback only
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is not set - run sh monitoring/scripts/init-monitoring-env.sh}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/mformusic-service-health.json
+    volumes:
+      - grafana_cloud_data:/var/lib/grafana
+      # Same provisioning and dashboards as the local stack; the data source URL http://prometheus:9090
+      # resolves to the `prometheus` service above.
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+
+volumes:
+  prometheus_cloud_data:
+  grafana_cloud_data:

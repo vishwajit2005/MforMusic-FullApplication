@@ -2,18 +2,20 @@ global:
   scrape_interval: 15s       # How often to collect metrics
   evaluation_interval: 15s   # How often to evaluate alerting rules
   external_labels:
-    env: production
+    env: local               # docker-compose stack. Change when you point this file at a real deployment.
     project: mformusic
 
-# Alert rules file
+# Alert rule files
 rule_files:
   - "/etc/prometheus/alert_rules.yml"
 
-# Alertmanager connection
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets: ["alertmanager:9093"]
+# Alertmanager is NOT part of docker-compose.yml, so alert delivery is disabled by default
+# (rules still evaluate and are visible at http://localhost:9090/alerts).
+# To deliver alerts, add an alertmanager service and uncomment:
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ["alertmanager:9093"]
 
 # ── Scrape targets ─────────────────────────────────────────────────────────────
 scrape_configs:
@@ -23,28 +25,28 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:9090"]
 
-  # Spring Boot — Micrometer / Actuator
-  # Update host:port to match your Render.com service domain in production
-  - job_name: mformusic-backend
-    metrics_path: /actuator/prometheus
-    scrape_interval: 10s
-    static_configs:
-      - targets: ["backend:8080"]
-        labels:
-          service: spring-boot
-          environment: docker
-    # Production override — uncomment and replace with Render domain:
-    # - targets: ["mformusic-backend.onrender.com"]
+  # Spring Boot backend is intentionally disabled for deployed monitoring because
+  # /actuator/prometheus on Render is not configured or exposed.
+  # - job_name: mformusic-backend
+  #   metrics_path: /actuator/prometheus
+  #   scrape_interval: 10s
+  #   static_configs:
+  #     - targets: ["backend:8080"]
 
-  # FastAPI MLOps — prometheus-fastapi-instrumentator
+  # Deployed FastAPI MLOps service on Render (https://mformusic-mlops.onrender.com)
   - job_name: mformusic-mlops
+    scheme: https
     metrics_path: /metrics
-    scrape_interval: 10s
+    scrape_interval: 15s
+    scrape_timeout: 12s
+    authorization:
+      type: Bearer
+      credentials_file: /run/metrics/token
     static_configs:
-      - targets: ["mlops:8000"]
+      - targets: ["mformusic-mlops.onrender.com"]
         labels:
           service: fastapi-mlops
-          environment: docker
+          environment: render
 
   # Kafka broker JMX metrics (requires JMX exporter sidecar in production)
   # - job_name: kafka

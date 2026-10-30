@@ -1,0 +1,51 @@
+# Prometheus config for monitoring the DEPLOYED (Render) MforMusic API from your machine.
+# Used by docker-compose.cloud-monitoring.yml (Prometheus + Grafana only; nothing else runs locally).
+#
+# Render free-tier notes (see monitoring/README.md, section 9):
+#  * Any scrape counts as inbound traffic, so scraping keeps the free service awake and uses your
+#    monthly free instance hours. Stop the stack when you are not demoing:
+#        docker compose -f docker-compose.cloud-monitoring.yml down
+#  * A sleeping service needs up to ~1 minute to wake, hence the long scrape_timeout.
+global:
+  scrape_interval: 60s
+  scrape_timeout: 50s        # must be <= scrape_interval
+  external_labels:
+    env: render
+    project: mformusic
+
+scrape_configs:
+
+  # Self-monitoring
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Deployed FastAPI MLOps service. The job name is kept as "mformusic-mlops" so the provisioned
+  # Grafana dashboards work unchanged.
+  #
+  # Auth: /metrics enforces its own bearer token (METRICS_TOKEN on Render). docker-compose.cloud-monitoring.yml
+  # writes CLOUD_METRICS_TOKEN from your root .env into /run/metrics/token (in-memory tmpfs), so the
+  # secret is never stored in this file. The shared MLOPS_API_KEY is NOT needed or used here.
+  - job_name: mformusic-mlops
+    scheme: https
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /run/metrics/token
+    static_configs:
+      - targets: ["mformusic-mlops.onrender.com"]
+        labels:
+          service: fastapi-mlops
+          environment: render
+
+  # Deployed Spring Boot backend: intentionally NOT enabled. Only uncomment after confirming that
+  # /actuator/prometheus on Render is protected (an unauthenticated public metrics endpoint leaks
+  # internals) and that Prometheus can authenticate to it.
+  # - job_name: mformusic-backend
+  #   scheme: https
+  #   metrics_path: /actuator/prometheus
+  #   static_configs:
+  #     - targets: ["mformusic-backend.onrender.com"]
+  #       labels:
+  #         service: spring-boot
+  #         environment: render

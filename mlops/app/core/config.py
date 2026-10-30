@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     PORT: int = 8000
     MYSQL_URL: str = ""
 
+    # ── Monitoring ───────────────────────────────────────────────────────────
+    # Bearer token required by GET /metrics (Prometheus scrape endpoint).
+    # Empty (default) = /metrics is disabled and answers 503. Minimum 16 characters.
+    # Generate one with: openssl rand -hex 32   (never commit the real value)
+    METRICS_TOKEN: str = ""
+
     model_config = {"env_file": ".env", "case_sensitive": True, "extra": "ignore"}
 
 

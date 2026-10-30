@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Annotated
 from pydantic import StringConstraints
 
@@ -9,6 +10,7 @@ from app.core.database import get_db
 from app.schemas.recommendation import RecommendationResponse, ModelStatusResponse, SimilarSongsResponse
 from app.services.cf_engine import cf_engine
 from app.core.config import get_settings
+from app.core import metrics as prom
 from app.services.recommendation_metrics import recommendation_metrics
 from app.services.recommendation_service import get_recommendations, get_similar_recommendations
 
@@ -42,14 +44,25 @@ def similar_songs(
     current_song_artist: Annotated[str | None, Query(max_length=512)] = None,
     db: Session = Depends(get_db),
 ):
+    started = time.perf_counter()
     try:
-        return get_similar_recommendations(
+        result = get_similar_recommendations(
             user_id, current_song_id, context_song_ids, db, n,
             current_song_title=current_song_title, current_song_artist=current_song_artist,
         )
     except Exception:
+        prom.record_recommendation_failure("similar", time.perf_counter() - started)
         logger.exception("Similar Songs request failed")
         raise HTTPException(status_code=500, detail="Failed to compute similar songs")
+    recs_count = len(result.get("recommendations", [])) if isinstance(result, dict) else 0
+    prom.record_recommendation(
+        "similar", result.get("source") if isinstance(result, dict) else None, time.perf_counter() - started,
+        songs_count=recs_count,
+    )
+    if isinstance(result, dict) and "recommendations" in result:
+        scores = [r.get("score") for r in result["recommendations"] if isinstance(r, dict) and "score" in r]
+        prom.record_recommendation_scores("similar", result.get("source"), scores)
+    return result
 
 
 @router.get(
@@ -69,14 +82,26 @@ def recommend(
 ):
     diagnostics = {}
     priority = get_settings().RECOMMENDATION_PRIORITY
+    started = time.perf_counter()
     try:
         result = get_recommendations(user_id=user_id, db=db, n=n, diagnostics=diagnostics)
     except Exception as e:
         logger.error(f"Recommendation error for user {user_id}: {e}", exc_info=True)
         recommendation_metrics.record("error", priority)
+        prom.record_recommendation_failure("for_you", time.perf_counter() - started)
         raise HTTPException(status_code=500, detail="Failed to compute recommendations")
     reason = diagnostics.get("content_fallback_reason") if result["source"] in ("popular", "cold_start") else None
     recommendation_metrics.record(result["source"], priority, reason)
+    recs_count = len(result.get("recommendations", [])) if isinstance(result, dict) else 0
+    prom.record_recommendation(
+        "for_you", result["source"], time.perf_counter() - started,
+        primary_tier="content_based" if priority == "content_first" else "collaborative_filtering",
+        fallback_reason=reason,
+        songs_count=recs_count,
+    )
+    if "recommendations" in result and isinstance(result["recommendations"], list):
+        scores = [r.get("score") for r in result["recommendations"] if isinstance(r, dict) and "score" in r]
+        prom.record_recommendation_scores("for_you", result["source"], scores)
     logger.info("[RecommendationOutcome] source=%s priority=%s fallback_reason=%s",
                 result["source"], priority, reason)
     return result

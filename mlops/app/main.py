@@ -36,6 +36,7 @@ from app.api.v1 import content as content_router
 from app.explainability import api as explainability_router
 from app.consumers.kafka_consumer import get_kafka_consumer
 from app.core.config import get_settings
+from app.core import metrics as prom
 from app.core.database import Base, SessionLocal, engine, ensure_pgvector_extension, ensure_song_embeddings_hnsw_index
 from app.models.interaction import Interaction          # noqa: F401 — ensures table is created
 from app.models.song_embedding import SongEmbedding     # noqa: F401 — ensures table is created
@@ -182,19 +183,58 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# ── Active In-Flight Requests Tracking ────────────────────────────────────────
+@app.middleware("http")
+async def track_active_requests(request, call_next):
+    path = request.url.path
+    if path in ("/health", "/metrics", "/docs", "/openapi.json"):
+        return await call_next(request)
+    handler = (
+        "/api/v1/recommendations" if path.startswith("/api/v1/recommendations")
+        else "/api/v1/interactions" if path.startswith("/api/v1/interactions")
+        else "/api/v1/search" if path.startswith("/api/v1/search")
+        else "/api/v1/content" if path.startswith("/api/v1/content")
+        else "/api/v1/explainability" if path.startswith("/api/v1/explainability")
+        else "other"
+    )
+    prom.HTTP_ACTIVE_REQUESTS.labels(handler).inc()
+    try:
+        return await call_next(request)
+    finally:
+        prom.HTTP_ACTIVE_REQUESTS.labels(handler).dec()
+
 # ── Prometheus Metrics (Phase 8) ──────────────────────────────────────────────
-# Exposes GET /metrics — scraped by Prometheus every 10s
-# Metrics: request counts, latency histograms, in-flight requests
+# HTTP metrics (http_requests_total, http_request_duration_seconds, ...) come from
+# prometheus-fastapi-instrumentator, now with finer latency buckets. Its built-in
+# .expose() is NOT used any more: GET /metrics is served by app.core.metrics.router,
+# which requires `Authorization: Bearer $METRICS_TOKEN` and answers 503 while
+# METRICS_TOKEN is unset. Custom mformusic_* metrics are defined in app/core/metrics.py;
+# model state is read from the live engines at scrape time (no behaviour change).
+app.include_router(prom.router)
+prom.register_model_collector(
+    cf=lambda: {
+        "trained": cf_engine.is_trained,
+        "model_version": cf_engine.model_version,
+        "retraining": cf_engine._is_retraining,
+        "total_interactions": cf_engine._total_interactions,
+        "total_users": cf_engine._total_users,
+        "total_songs": cf_engine._total_songs,
+    },
+    content=lambda: content_service.stats,  # keys: ready, retraining, model_version, total_tracks
+    priority=lambda: settings.RECOMMENDATION_PRIORITY,
+)
+prom.register_pool_collector(engine)
 try:
     from prometheus_fastapi_instrumentator import Instrumentator
     Instrumentator(
         should_group_status_codes=True,
         should_ignore_untemplated=True,
         excluded_handlers=["/health", "/metrics"],
-    ).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
-    logger.info("Prometheus /metrics endpoint registered ✓")
+    ).instrument(app, latency_lowr_buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0))
+    logger.info("Prometheus instrumentation active; /metrics requires METRICS_TOKEN ✓")
 except ImportError:
-    logger.warning("prometheus-fastapi-instrumentator not installed — /metrics unavailable.")
+    logger.warning("prometheus-fastapi-instrumentator not installed — HTTP request metrics unavailable.")
 
 
 # ── Routers ───────────────────────────────────────────────────────────────────

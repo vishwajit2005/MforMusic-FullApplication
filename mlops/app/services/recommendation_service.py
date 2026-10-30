@@ -10,6 +10,7 @@ from itertools import islice
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core import metrics as prom
 from app.models.interaction import Interaction
 from app.models.song_embedding import SongEmbedding
 from app.schemas.interaction import InteractionIngest
@@ -25,6 +26,31 @@ settings = get_settings()
 # ── Retrain counter (thread-safe) ─────────────────────────────────────────────
 _interaction_count = 0
 _count_lock = threading.Lock()
+
+# ── Recommended song impression tracking ──────────────────────────────────────
+# Correlates subsequent play events with songs previously served to the user.
+_recent_user_recommendations: dict[str, set[str]] = {}
+_rec_lock = threading.Lock()
+_MAX_USERS_TRACKED = 2000
+
+
+def record_served_recommendation_ids(user_id: str, song_ids: list[str]) -> None:
+    """Store served recommendation IDs for a user to correlate with later play events."""
+    if not user_id or not song_ids:
+        return
+    with _rec_lock:
+        if len(_recent_user_recommendations) > _MAX_USERS_TRACKED:
+            _recent_user_recommendations.clear()
+        _recent_user_recommendations.setdefault(str(user_id), set()).update(str(s) for s in song_ids)
+
+
+def is_recommended_song(user_id: str, song_id: str) -> bool:
+    """Check if song_id was previously served to user_id by the recommendation service."""
+    if not user_id or not song_id:
+        return False
+    with _rec_lock:
+        user_recs = _recent_user_recommendations.get(str(user_id))
+        return str(song_id) in user_recs if user_recs else False
 
 
 def ingest_interaction(db: Session, payload: InteractionIngest) -> tuple[Interaction, bool]:
@@ -48,6 +74,9 @@ def ingest_interaction(db: Session, payload: InteractionIngest) -> tuple[Interac
     db.add(interaction)
     db.commit()
     db.refresh(interaction)
+
+    if payload.interaction_type == "play" and is_recommended_song(payload.user_id, payload.song_id):
+        prom.record_recommended_play()
 
     # ── Upsert song embedding (Phase 6) ──────────────────────────────────────
     # On first encounter of a song_id, generate and store its embedding so it
@@ -179,6 +208,7 @@ def get_recommendations(
                     f"[Recs] CF recommendations for user={user_id}: "
                     f"{len(recs)} tracks (model={cf_engine.model_version})"
                 )
+                record_served_recommendation_ids(user_id, [r["song_id"] for r in recs if isinstance(r, dict) and "song_id" in r])
                 return {
                     "user_id": user_id,
                     "recommendations": recs,
@@ -217,6 +247,7 @@ def get_recommendations(
                         f"(positive_window={len(recent_positive_track_ids)}): {len(content_recs)} tracks "
                         f"(model={content_service.model_version})"
                     )
+                    record_served_recommendation_ids(user_id, [r["song_id"] for r in content_recs if isinstance(r, dict) and "song_id" in r])
                     return {
                         "user_id": user_id,
                         "recommendations": content_recs,
@@ -236,6 +267,7 @@ def get_recommendations(
         )
         if emb_recs:
             logger.info(f"[Recs] Embedding-based recommendations for user={user_id}: {len(emb_recs)} tracks")
+            record_served_recommendation_ids(user_id, [r["song_id"] for r in emb_recs if isinstance(r, dict) and "song_id" in r])
             return {
                 "user_id": user_id,
                 "recommendations": emb_recs,
@@ -250,6 +282,8 @@ def get_recommendations(
         f"(interactions={user_count}, cf_trained={cf_engine.is_trained}, content_ready={content_service.is_ready})."
     )
     songs = _finalize(cf_engine.get_popular_songs(db, fetch_n), top_n, db, recent_interacted_ids)
+    if songs:
+        record_served_recommendation_ids(user_id, [r["song_id"] for r in songs if isinstance(r, dict) and "song_id" in r])
     return {
         "user_id": user_id,
         "recommendations": songs,
@@ -302,6 +336,8 @@ def get_similar_recommendations(
     # Title/artist sent by the backend lets us block other versions of the song playing now.
     current_meta = {current_song_id: (current_song_title, current_song_artist)} if current_song_title else None
     recommendations = _finalize(recommendations, n, db, blocked, current_meta)
+    if recommendations:
+        record_served_recommendation_ids(user_id, [r["song_id"] for r in recommendations if isinstance(r, dict) and "song_id" in r])
     return {
         "user_id": user_id,
         "current_song_id": current_song_id,

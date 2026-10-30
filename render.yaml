@@ -90,6 +90,10 @@ services:
     sync: false
   - key: MYSQL_URL
     sync: false
+  # Bearer token that protects GET /metrics (scraped by Prometheus). Set the value in the Render
+  # dashboard; the same value goes in your local .env as CLOUD_METRICS_TOKEN. Unset = /metrics returns 503.
+  - key: METRICS_TOKEN
+    sync: false
   - key: EMBEDDING_SERVICE_URL
     value: https://mformusic-embeddings.onrender.com
   - key: KAFKA_BOOTSTRAP_SERVERS

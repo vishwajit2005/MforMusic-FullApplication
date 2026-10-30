@@ -67,3 +67,25 @@ groups:
         annotations:
           summary: "⚠️ HikariCP pool has pending connection requests"
           description: "{{ $value }} threads are waiting for a DB connection. Increase hikari.maximum-pool-size."
+
+      # ── High Recommendation Failures ───────────────────────────────────────
+      - alert: HighRecommendationFailureRate
+        expr: |
+          sum(rate(mformusic_recommendation_failures_total[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "⚠️ High recommendation failure rate"
+          description: "Recommendation failures are exceeding 0.05/s. Check model serving health."
+
+      # ── Dependency Errors (External API & FastAPI) ─────────────────────────
+      - alert: ExternalMusicApiOutage
+        expr: |
+          sum(rate(mformusic_dependency_call_errors_total{dependency="external_music_api"}[5m])) > 0.2
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "🔴 High failure rate calling external music catalogue"
+          description: "JioSaavn catalogue API lookup/search calls are failing. Check upstream availability."

@@ -2,6 +2,7 @@ import logging
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from app.core.config import get_settings
+from app.core.metrics import instrument_engine
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -15,6 +16,9 @@ engine = create_engine(
     max_overflow=10,
     echo=False,
 )
+
+# Prometheus: per-operation SQL duration/error metrics (labels are a fixed set; SQL text is never exported)
+instrument_engine(engine)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

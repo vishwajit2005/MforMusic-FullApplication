@@ -1,0 +1,779 @@
+{
+  "uid": "mformusic-service-health",
+  "title": "MforMusic - Operational Monitoring",
+  "description": "Operational monitoring for MforMusic: Service Health, Model Readiness, and Interaction & Recommendation Activity.",
+  "tags": [
+    "mformusic",
+    "operational-monitoring"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 3,
+  "editable": false,
+  "graphTooltip": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "type": "dashboards",
+      "title": "MforMusic dashboards",
+      "tags": [
+        "mformusic"
+      ],
+      "asDropdown": true,
+      "includeVars": false,
+      "keepTime": true
+    },
+    {
+      "type": "link",
+      "title": "Streamlit: per-user history + SHAP",
+      "url": "http://localhost:8501",
+      "targetBlank": true,
+      "icon": "external link",
+      "tooltip": "User-level interaction history and SHAP explanations (not available in Prometheus)"
+    }
+  ],
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "1. Service Health",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "FastAPI (MLOps Engine)",
+      "description": "Availability status of the FastAPI MLOps recommendation service. Scraped at /metrics.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "up{job=~\".*mlops.*\"}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "DOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "FastAPI Uptime",
+      "description": "Elapsed time since the FastAPI MLOps process started.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "time() - process_start_time_seconds{job=~\".*mlops.*\"}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "n/a"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Process Restarts (24h)",
+      "description": "Number of process restarts over the last 24 hours.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "changes(process_start_time_seconds{job=~\".*mlops.*\"}[24h])",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Prometheus Scrape Status",
+      "description": "Status of the Prometheus self-monitoring scrape job.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "up{job=\"prometheus\"}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "DOWN",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 500,
+      "type": "row",
+      "title": "2. Model Readiness & Health",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      }
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "CF (ALS) Model Ready",
+      "description": "Whether the Collaborative Filtering (implicit ALS) model is loaded and ready to serve.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 6
+      },
+      "targets": [
+        {
+          "expr": "mformusic_model_available{model=\"collaborative_filtering\"}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "NOT READY",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "READY",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Content (Audio KNN) Ready",
+      "description": "Whether the Content-Based (audio feature KNN) model is loaded and ready to serve.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 6
+      },
+      "targets": [
+        {
+          "expr": "mformusic_model_available{model=\"content_based\"}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "NOT READY",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "READY",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 24,
+      "type": "stat",
+      "title": "CF Active Version",
+      "description": "Active artifact version string for Collaborative Filtering model.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 6
+      },
+      "targets": [
+        {
+          "expr": "mformusic_model_info{model=\"collaborative_filtering\"}",
+          "refId": "A",
+          "legendFormat": "{{version}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "n/a"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^version$/"
+        },
+        "textMode": "value",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "Content Active Version",
+      "description": "Active artifact version string for Content-Based audio KNN model.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 6
+      },
+      "targets": [
+        {
+          "expr": "mformusic_model_info{model=\"content_based\"}",
+          "refId": "A",
+          "legendFormat": "{{version}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "n/a"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^version$/"
+        },
+        "textMode": "value",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 26,
+      "type": "stat",
+      "title": "Time Since Last Retrain",
+      "description": "Elapsed time since last completed model retraining.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 6
+      },
+      "targets": [
+        {
+          "expr": "time() - (mformusic_model_last_retrain_success_timestamp_seconds{model=\"collaborative_filtering\"} > 0)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Never",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 86400
+              },
+              {
+                "color": "red",
+                "value": 604800
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 27,
+      "type": "stat",
+      "title": "Retraining Status",
+      "description": "Whether an ALS or Content model retrain is currently running in background.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 6
+      },
+      "targets": [
+        {
+          "expr": "sum(mformusic_model_retraining_in_progress)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "IDLE",
+                  "color": "green"
+                },
+                "1": {
+                  "text": "TRAINING",
+                  "color": "yellow"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 300,
+      "type": "row",
+      "title": "3. Interactions & Recommendation Activity",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      }
+    },
+    {
+      "id": 101,
+      "type": "timeseries",
+      "title": "Songs Played per Minute",
+      "description": "Actual song play events per minute ingested via telemetry/interaction API (interaction_type='play'). Clearly counts only genuine playback events.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 11
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(mformusic_telemetry_events_total{interaction_type=\"play\", result=\"accepted\"}[1m])) * 60 or (rate(http_requests_total{handler=\"/api/v1/interactions/ingest\", method=\"POST\", status=\"2xx\"}[1m]) * 60)",
+          "refId": "A",
+          "legendFormat": "Plays / min"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "plays/min",
+          "custom": {
+            "fillOpacity": 20,
+            "showPoints": "auto",
+            "lineWidth": 2
+          },
+          "min": 0
+        }
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 102,
+      "type": "timeseries",
+      "title": "Recommended Songs Listened To",
+      "description": "Number of play events where the played song was previously served to that user by the recommendation service.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 11
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(mformusic_recommended_plays_total[1m])) * 60",
+          "refId": "A",
+          "legendFormat": "Recommended Plays / min"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "plays/min",
+          "custom": {
+            "fillOpacity": 20,
+            "showPoints": "auto",
+            "lineWidth": 2
+          },
+          "min": 0
+        }
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 103,
+      "type": "timeseries",
+      "title": "Songs Served by Model in Last 1h (Individual Tracks)",
+      "description": "Rolling 1-hour count of individual recommended songs served to users, partitioned by the serving model/tier (Collaborative Filtering, Content-Based, Embeddings, Popular Fallback). Counts individual tracks returned in recommendation payloads.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 19
+      },
+      "targets": [
+        {
+          "expr": "sum by (tier) (increase(mformusic_recommendation_songs_served_total{mode=\"for_you\"}[1h])) or sum(increase(http_requests_total{handler=~\".*recommendations.*\", status=\"2xx\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{tier}} songs served"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 15,
+            "showPoints": "auto",
+            "lineWidth": 2
+          },
+          "min": 0
+        }
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "New Interaction Records Written / Minute",
+      "description": "Live aggregate interaction events accepted per minute, split by interaction type (play, like, unlike, skip, download, playlist_add).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 19
+      },
+      "targets": [
+        {
+          "expr": "sum by (interaction_type) (rate(mformusic_telemetry_events_total{result=\"accepted\"}[1m])) * 60 or (rate(http_requests_total{handler=\"/api/v1/interactions/ingest\", method=\"POST\", status=\"2xx\"}[1m]) * 60)",
+          "refId": "A",
+          "legendFormat": "{{interaction_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "records/min",
+          "custom": {
+            "fillOpacity": 15,
+            "showPoints": "auto",
+            "lineWidth": 2
+          },
+          "min": 0
+        }
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    }
+  ]
+}

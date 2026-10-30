@@ -11,6 +11,7 @@ Supports organic model growth and automatic, thread-safe retraining with hot-swa
 import logging
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -22,9 +23,12 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core import metrics as prom
 from app.models.song_audio_feature import SongAudioFeature, FEATURE_COLUMNS_63
 
 logger = logging.getLogger(__name__)
+
+_METRIC_MODEL = "content_based"  # Prometheus label value for this model
 
 REJECT_SIMILARITY_THRESHOLD = 0.75
 REJECT_PENALTY = 0.30
@@ -256,6 +260,7 @@ class ContentRecommendationService:
                 self._model_version = version_tag
                 self._is_ready = True
 
+            prom.record_model_loaded(_METRIC_MODEL)
             logger.info(
                 f"Content-based recommendation model loaded successfully: "
                 f"{version_tag} ({len(track_ids)} candidate songs)"
@@ -513,8 +518,10 @@ class ContentRecommendationService:
         with self._lock:
             if self._is_retraining:
                 logger.info("Content model retraining already in progress — skipping.")
+                prom.record_retrain(_METRIC_MODEL, "skipped")
                 return False
             self._is_retraining = True
+        started = time.perf_counter()
 
         try:
             logger.info("Checking for new extracted audio features...")
@@ -533,9 +540,11 @@ class ContentRecommendationService:
                     f"New songs ({new_count}) < threshold ({settings.MIN_NEW_SONGS_FOR_CONTENT_RETRAIN}). "
                     "Skipping content retraining."
                 )
+                prom.record_retrain(_METRIC_MODEL, "skipped")
                 return False
 
             if new_count == 0 and not force:
+                prom.record_retrain(_METRIC_MODEL, "skipped")
                 return False
 
             # Model directory
@@ -546,6 +555,7 @@ class ContentRecommendationService:
 
             if not track_index_path.exists():
                 logger.warning(f"Baseline track_index.csv not found at {track_index_path}. Cannot retrain.")
+                prom.record_retrain(_METRIC_MODEL, "failure", started)
                 return False
 
             # Load existing base metadata and features
@@ -586,6 +596,7 @@ class ContentRecommendationService:
                 for row in new_features_rows:
                     row.incorporated_in_model = True
                 db.commit()
+                prom.record_retrain(_METRIC_MODEL, "skipped")
                 return False
 
             # Merge metadata
@@ -701,11 +712,13 @@ class ContentRecommendationService:
                 self._is_ready = True
 
             logger.info(f"Content-based model retraining and hot-swap complete ✓ (version={version_tag})")
+            prom.record_retrain(_METRIC_MODEL, "success", started)
             return True
 
         except Exception as e:
             logger.error(f"Content model retraining failed: {e}", exc_info=True)
             db.rollback()
+            prom.record_retrain(_METRIC_MODEL, "failure", started)
             return False
         finally:
             with self._lock:
