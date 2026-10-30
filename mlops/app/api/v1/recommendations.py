@@ -27,7 +27,8 @@ SongId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, m
     description=(
         "Current song plus up to four prior plays, newest first. Current weight "
         "70; context weights 12,8,6,4 multiplied by latest-positive interaction quality. "
-        "Recent strong rejects softly re-rank candidates. Unknown tracks are skipped. All seed and "
+        "Recent strong rejects softly re-rank candidates. Unknown tracks are skipped; if the current "
+        "song is outside the audio catalog, title+artist embeddings lead the list. All seed and "
         "user-interacted IDs are excluded. No CF or popular fallback. This mode "
         "does not enter the For You serving-distribution counter."
     ),
@@ -37,10 +38,15 @@ def similar_songs(
     current_song_id: Annotated[SongId, Query()],
     context_song_ids: Annotated[list[SongId], Query(max_length=4)] = [],
     n: int = Query(default=20, ge=1, le=50),
+    current_song_title: Annotated[str | None, Query(max_length=512)] = None,
+    current_song_artist: Annotated[str | None, Query(max_length=512)] = None,
     db: Session = Depends(get_db),
 ):
     try:
-        return get_similar_recommendations(user_id, current_song_id, context_song_ids, db, n)
+        return get_similar_recommendations(
+            user_id, current_song_id, context_song_ids, db, n,
+            current_song_title=current_song_title, current_song_artist=current_song_artist,
+        )
     except Exception:
         logger.exception("Similar Songs request failed")
         raise HTTPException(status_code=500, detail="Failed to compute similar songs")

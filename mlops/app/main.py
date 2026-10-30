@@ -137,6 +137,11 @@ async def lifespan(app: FastAPI):
         content_loaded = content_service.load_artifacts(settings.CONTENT_MODEL_DIR)
         if content_loaded:
             logger.info(f"Content-based model ready: {content_service.model_version}")
+            if has_vector:
+                # Background, idempotent: gives every catalog song a title+artist
+                # embedding so the out-of-catalog fallback can reach catalog songs.
+                from app.services.embedding_recommender import start_catalog_seeding
+                start_catalog_seeding(content_service.catalog_metadata())
         else:
             logger.info("Content-based model not loaded (artifacts missing or directory empty) — will use popular fallback.")
     except Exception as e:

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.mformusic.frontend.model.SongResponse
 import com.mformusic.frontend.network.PlayerManager
 import com.mformusic.frontend.network.RetrofitClient
+import com.mformusic.frontend.network.playExact
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -59,7 +60,7 @@ class LikedSongsViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 // Resolve the selected song's best stream URL
-                val response = api.playOrCacheSong(song.title)
+                val response = api.playExact(song)
                 if (response.isSuccessful && response.body() != null) {
                     val resolvedSong = response.body()!!
                     val resolvedUrl  = resolvedSong.s3Url ?: resolvedSong.saavnUrl

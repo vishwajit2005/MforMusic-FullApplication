@@ -5,7 +5,7 @@ from threading import Lock
 
 
 class RecommendationMetrics:
-    OUTCOMES = ('content_based', 'collaborative_filtering', 'popular', 'cold_start', 'error')
+    OUTCOMES = ('content_based', 'collaborative_filtering', 'embedding_based', 'popular', 'cold_start', 'error')
 
     def __init__(self, window_size: int = 100):
         if window_size < 1:

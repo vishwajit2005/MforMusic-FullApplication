@@ -121,6 +121,11 @@ class ContentRecommendationService:
                 return None
             return self._track_metadata.get(str(track_id))
 
+    def catalog_metadata(self) -> dict[str, dict[str, Any]]:
+        """Snapshot of catalog metadata (song_id -> row) — used to seed title+artist embeddings."""
+        with self._lock:
+            return dict(self._track_metadata) if self._is_ready else {}
+
     def _resolve_model_dir(self, model_dir_path: str | Path) -> Path:
         """Resolves model directory path relative to current working directory or app root."""
         p = Path(model_dir_path)

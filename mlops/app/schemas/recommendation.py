@@ -15,7 +15,7 @@ class RecommendationResponse(BaseModel):
     recommendations: List[SongRecommendation]
     model_version: str
     total: int
-    source: Literal["collaborative_filtering", "content_based", "popular", "cold_start"]
+    source: Literal["collaborative_filtering", "content_based", "embedding_based", "popular", "cold_start"]
 
 
 class ModelStatusResponse(BaseModel):
@@ -36,4 +36,4 @@ class SimilarSongsResponse(BaseModel):
     recommendations: List[SongRecommendation]
     model_version: str
     total: int
-    source: Literal["content_based"] = "content_based"
+    source: Literal["content_based", "embedding_based"] = "content_based"

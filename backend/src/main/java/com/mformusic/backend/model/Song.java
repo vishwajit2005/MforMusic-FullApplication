@@ -53,4 +53,17 @@ public class Song {
 
     @Transient
     private Boolean liked = false;
+
+    /**
+     * JioSaavn sends titles with HTML entities (e.g. &quot;). Clean them on every
+     * load/save so rows saved before this fix display correctly and get repaired
+     * the next time they are written.
+     */
+    @PostLoad
+    @PrePersist
+    @PreUpdate
+    public void unescapeText() {
+        title = com.mformusic.backend.util.SongText.unescape(title);
+        artistName = com.mformusic.backend.util.SongText.unescape(artistName);
+    }
 }

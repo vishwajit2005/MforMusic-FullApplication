@@ -162,55 +162,55 @@ public class SongService {
         return new ArrayList<>(uniqueSongs.values());
     }
 
+    /** Max results returned to the search screen. */
+    static final int SEARCH_RESULT_LIMIT = 30;
+
     /**
-     * Hybrid search: local MySQL results first (instant), then JioSaavn results (up to 5),
-     * de-duplicated by externalTrackId.
+     * Hybrid search ranked by relevance (Spotify-style): local cached songs and up to
+     * 40 JioSaavn results are merged, scored against the query (exact/prefix title
+     * match, all words present, artist match, small typo tolerance) and the best
+     * matches returned first — so the exact song is found even when JioSaavn's own
+     * top 5 does not contain it.
      */
     public List<Song> getHybridSearchResults(String query, Long userId) {
-        List<Song> mergedResults = new ArrayList<>();
-        Set<String> seenTrackIds = new HashSet<>();
+        String trimmed = query == null ? "" : query.trim();
+        if (trimmed.isEmpty()) return List.of();
+        List<SearchRanker.Candidate> candidates = new ArrayList<>();
 
-        // Step 1: Local DB (fast, exact-match cached songs)
-        log.info("Searching local DB for: {}", query);
-        List<Song> localResults = songRepository.findByTitleContainingIgnoreCase(query);
-        for (Song song : localResults) {
-            if (userId != null) {
-                song.setLiked(likedSongRepository.existsByUserIdAndSongId(userId, song.getId()));
-            }
-            mergedResults.add(song);
-            seenTrackIds.add(song.getExternalTrackId());
+        // Step 1: Local DB (title or artist)
+        List<Song> localResults = songRepository
+                .findTop25ByTitleContainingIgnoreCaseOrArtistNameContainingIgnoreCase(trimmed, trimmed);
+        for (int i = 0; i < localResults.size(); i++) {
+            candidates.add(new SearchRanker.Candidate(localResults.get(i), i, localResults.size(), true));
         }
-        log.info("Local results: {}", localResults.size());
+        log.info("Local results for '{}': {}", trimmed, localResults.size());
 
-        // Step 2: JioSaavn global results (add only if not already in local results)
-        if (query.length() >= 2) {
-            log.info("Fetching JioSaavn results for: {}", query);
+        // Step 2: JioSaavn global results
+        if (trimmed.length() >= 2) {
             try {
-                List<Map<String, Object>> externalResults = externalMusicService.searchMultipleSongs(query);
-                for (Map<String, Object> data : externalResults) {
-                    String trackId = (String) data.get("id");
-                    if (seenTrackIds.contains(trackId)) continue;
-
-                    Song externalSong = new Song();
-                    externalSong.setExternalTrackId(trackId);
-                    externalSong.setTitle((String) data.get("title"));
-                    externalSong.setArtistName((String) data.get("artistName"));
-                    externalSong.setDurationInSeconds(((Number) data.get("duration")).intValue());
-                    externalSong.setThumbnailUrl((String) data.get("thumbnailUrl"));
-                    externalSong.setSaavnUrl((String) data.get("audioUrl"));
-                    externalSong.setPlayCount(0);
-                    externalSong.setStoredInS3(Boolean.FALSE);
-
-                    mergedResults.add(externalSong);
-                    seenTrackIds.add(trackId);
+                List<Map<String, Object>> externalResults = externalMusicService.searchMultipleSongs(trimmed);
+                for (int i = 0; i < externalResults.size(); i++) {
+                    candidates.add(new SearchRanker.Candidate(
+                            ExternalMusicService.toSong(externalResults.get(i)), i, externalResults.size(), false));
                 }
+                log.info("JioSaavn results for '{}': {}", trimmed, externalResults.size());
             } catch (Exception e) {
                 log.warn("External search failed (showing local results only): {}", e.getMessage());
             }
         }
 
-        log.info("Total merged results: {}", mergedResults.size());
-        return mergedResults;
+        // Local rows come first in the candidate list, so on equal score and same
+        // track ID the cached row (with its DB id / like status) is the one kept.
+        List<Song> ranked = SearchRanker.rank(trimmed, candidates, SEARCH_RESULT_LIMIT);
+        if (userId != null) {
+            for (Song song : ranked) {
+                if (song.getId() != null) {
+                    song.setLiked(likedSongRepository.existsByUserIdAndSongId(userId, song.getId()));
+                }
+            }
+        }
+        log.info("Total ranked results: {}", ranked.size());
+        return ranked;
     }
 
     @Transactional
