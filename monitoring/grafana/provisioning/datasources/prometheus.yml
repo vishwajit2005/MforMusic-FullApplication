@@ -1,0 +1,15 @@
+apiVersion: 1
+
+# Provisioned automatically when the Grafana container starts: no manual
+# "Add data source" step is needed. The hostname `prometheus` is the Compose service name.
+datasources:
+  - name: Prometheus
+    uid: prometheus            # dashboards reference this uid
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      httpMethod: POST
+      timeInterval: 10s        # matches the 10s scrape_interval of the mformusic jobs

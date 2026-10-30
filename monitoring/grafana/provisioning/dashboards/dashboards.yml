@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: MforMusic
+    orgId: 1
+    folder: MforMusic
+    type: file
+    disableDeletion: true          # provisioned dashboards cannot be deleted from the UI
+    allowUiUpdates: false          # edit the JSON files in monitoring/grafana/dashboards instead
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards

@@ -11,8 +11,11 @@
 #   streamlit   — Streamlit Explainability & Telemetry UI (port 8501)
 #
 # Optional Monitoring (run with --profile monitoring or --profile all):
-#   prometheus  — Scrapes metrics from backend & mlops (port 9090)
-#   grafana     — Visualization dashboards (port 3000)
+#   prometheus  — Scrapes metrics from backend & mlops (http://127.0.0.1:9090, loopback only)
+#   grafana     — Provisioned dashboards (http://127.0.0.1:3000, loopback only)
+#   Requires METRICS_TOKEN (and optionally GRAFANA_PASSWORD) in the root .env — see
+#   monitoring/README.md. Streamlit (8501) remains the per-user/SHAP dashboard; Grafana is
+#   the service-level view.
 #
 # Usage:
 #   docker compose up -d            # start all core services
@@ -163,6 +166,9 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       KAFKA_TELEMETRY_TOPIC: mformusic.telemetry.interactions
       KAFKA_CONSUMER_GROUP: mlops-recommendation-engine
+      # Bearer token that protects GET /metrics. Empty = /metrics disabled (503).
+      # Set a real value (>= 16 chars) in the root .env: openssl rand -hex 32
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
     volumes:
       - mlops_model_cache:/app/.model_cache
     healthcheck:
@@ -206,15 +212,27 @@ services:
       - monitoring
       - all
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"   # loopback only: this UI and /-/reload are unauthenticated
+    environment:
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
       - prometheus_data:/prometheus
+    # The scrape token is written to an in-memory tmpfs at start-up (never stored on a volume or in git).
+    tmpfs:
+      - /run/metrics:mode=1777
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.retention.time=15d"
-      - "--web.enable-lifecycle"
+      - |
+        umask 077
+        [ -n "$$METRICS_TOKEN" ] || echo "WARNING: METRICS_TOKEN is empty - the mformusic-mlops scrape will fail (503) until it is set in .env" >&2
+        printf '%s' "$$METRICS_TOKEN" > /run/metrics/token
+        exec /bin/prometheus \
+          --config.file=/etc/prometheus/prometheus.yml \
+          --storage.tsdb.path=/prometheus \
+          --storage.tsdb.retention.time=15d \
+          --web.enable-lifecycle
 
   # ── Grafana (Optional Monitoring) ──────────────────────────────────────────
   grafana:
@@ -224,13 +242,24 @@ services:
     profiles:
       - monitoring
       - all
+    depends_on:
+      - prometheus
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"   # loopback only
     environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      # Local-dev fallback only. Set GRAFANA_PASSWORD in .env (init script: monitoring/scripts/init-monitoring-env.sh).
+      # Grafana applies it only when its database is first created; see monitoring/README.md to change it later.
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/mformusic-service-health.json
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
 
 volumes:
   mysql_data:

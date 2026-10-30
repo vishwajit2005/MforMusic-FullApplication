@@ -1,8 +1,10 @@
 import logging
+import time
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core import metrics as prom
 from app.core.database import get_db
 from app.schemas.interaction import InteractionIngest, InteractionIngestResponse
 from app.services.recommendation_service import ingest_interaction
@@ -25,13 +27,19 @@ def ingest(
     payload: InteractionIngest,
     db: Session = Depends(get_db),
 ):
+    started = time.perf_counter()
     try:
         interaction, retrain_triggered = ingest_interaction(db, payload)
+        prom.record_telemetry("http", payload.interaction_type, True, time.perf_counter() - started)
         return InteractionIngestResponse(
             status="accepted",
             id=interaction.id,
             retrain_triggered=retrain_triggered,
         )
     except Exception as e:
+        prom.record_telemetry(
+            "http", payload.interaction_type, False, time.perf_counter() - started,
+            failure=prom.classify_ingest_error(e),
+        )
         logger.error(f"Ingestion error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to store interaction")

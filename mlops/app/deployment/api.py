@@ -1,7 +1,9 @@
 """Compose unchanged serving routes with a remote encoder for free-tier memory isolation."""
 import os
+import time
 import numpy as np
 import requests
+from app.core import metrics as prom
 from app.services import embedding_service
 from app.deployment.auth import ServiceAuth
 
@@ -19,10 +21,16 @@ class RemoteEncoder:
         rows = [texts] if single else list(texts)
         vectors = []
         for i in range(0, len(rows), 64):
-            response = requests.post(self.url + "/encode", json={"texts": rows[i:i+64]},
-                                     headers={"X-MforMusic-Key": self.key}, timeout=(5, 90))
-            response.raise_for_status()
-            vectors.extend(response.json()["vectors"])
+            start = time.perf_counter()
+            try:
+                response = requests.post(self.url + "/encode", json={"texts": rows[i:i+64]},
+                                         headers={"X-MforMusic-Key": self.key}, timeout=(5, 90))
+                response.raise_for_status()
+                prom.record_dependency_call("embedding_service", "encode", time.perf_counter() - start, "success")
+                vectors.extend(response.json()["vectors"])
+            except Exception as e:
+                prom.record_dependency_call("embedding_service", "encode", time.perf_counter() - start, "failure", e.__class__.__name__)
+                raise
         result = np.asarray(vectors, dtype=np.float32)
         return result[0] if single else result
 

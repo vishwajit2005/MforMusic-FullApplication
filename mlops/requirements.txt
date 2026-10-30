@@ -25,6 +25,7 @@ librosa>=0.10.2
 soundfile>=0.12.1
 
 # Observability — Prometheus metrics scrape endpoint (Phase 8)
+prometheus-client>=0.20.0
 prometheus-fastapi-instrumentator==7.0.0
 
 # Kafka consumer — event-driven telemetry ingestion (Phase 9)

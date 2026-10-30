@@ -25,7 +25,10 @@ import json
 import logging
 import os
 import threading
+import time
 from typing import Optional
+
+from app.core import metrics as prom
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,7 @@ class TelemetryKafkaConsumer:
             return
 
         self._stop_event.clear()
+        prom.set_kafka_enabled(True)
         self._thread = threading.Thread(
             target=self._consume_loop,
             name="kafka-telemetry-consumer",
@@ -68,6 +72,7 @@ class TelemetryKafkaConsumer:
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=10)
+        prom.set_kafka_connected(False)
         logger.info("Kafka consumer stopped.")
 
     def _consume_loop(self):
@@ -95,6 +100,7 @@ class TelemetryKafkaConsumer:
                 )
 
                 logger.info("Kafka consumer connected. Waiting for messages...")
+                prom.set_kafka_connected(True)
                 retry_delay = 5  # reset back-off on successful connect
 
                 for message in consumer:
@@ -103,10 +109,13 @@ class TelemetryKafkaConsumer:
                     self._handle_message(message.value)
 
                 consumer.close()
+                prom.set_kafka_connected(False)
 
             except Exception as e:
+                prom.set_kafka_connected(False)
                 if self._stop_event.is_set():
                     break
+                prom.record_kafka_error()
                 logger.warning(
                     f"Kafka consumer error (retrying in {retry_delay}s): {e}"
                 )
@@ -118,6 +127,11 @@ class TelemetryKafkaConsumer:
         Process a single telemetry event from Kafka.
         Mirrors the Spring Boot TelemetryEventDto structure.
         """
+        started = time.perf_counter()
+        raw_type = (
+            (payload.get("interactionType") or payload.get("interaction_type"))
+            if isinstance(payload, dict) else None
+        )  # only used as a bounded metric label (unknown values become "other")
         try:
             from app.core.database import SessionLocal
             from app.schemas.interaction import InteractionIngest
@@ -142,6 +156,7 @@ class TelemetryKafkaConsumer:
             db = SessionLocal()
             try:
                 ingest_interaction(db, event)  # Fixed: db first, then payload
+                prom.record_telemetry("kafka", raw_type, True, time.perf_counter() - started)
                 logger.debug(
                     f"[Kafka] Ingested: user={event.user_id} "
                     f"song={event.song_id} type={event.interaction_type}"
@@ -150,6 +165,10 @@ class TelemetryKafkaConsumer:
                 db.close()
 
         except Exception as e:
+            prom.record_telemetry(
+                "kafka", raw_type, False, time.perf_counter() - started,
+                failure=prom.classify_ingest_error(e),
+            )
             logger.error(f"[Kafka] Failed to handle message (payload={payload}): {e}")
 
 

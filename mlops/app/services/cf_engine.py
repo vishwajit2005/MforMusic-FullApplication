@@ -19,6 +19,7 @@ Thread safety: all reads/writes to model state go through _lock (RLock).
 
 import logging
 import threading
+import time
 
 import numpy as np
 import scipy.sparse as sparse
@@ -27,8 +28,11 @@ from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 
 from app.models.interaction import Interaction
+from app.core import metrics as prom
 
 logger = logging.getLogger(__name__)
+
+_METRIC_MODEL = "collaborative_filtering"  # Prometheus label value for this engine
 
 
 # ── Interaction weight lookup ─────────────────────────────────────────────────
@@ -91,6 +95,7 @@ class CollaborativeFilterEngine:
         self._total_interactions: int = 0
         self._total_users: int = 0
         self._total_songs: int = 0
+        self._last_trained_timestamp: float = 0.0
 
         # Retraining state
         self._retrain_lock = threading.Lock()
@@ -117,6 +122,7 @@ class CollaborativeFilterEngine:
                 "total_interactions": self._total_interactions,
                 "total_users": self._total_users,
                 "total_songs": self._total_songs,
+                "last_trained_timestamp": self._last_trained_timestamp,
             }
 
     def train(self, db: Session) -> bool:
@@ -128,11 +134,16 @@ class CollaborativeFilterEngine:
         with self._retrain_lock:
             if self._is_retraining:
                 logger.info("Retrain already in progress — skipping duplicate trigger.")
+                prom.record_retrain(_METRIC_MODEL, "skipped")
                 return False
             self._is_retraining = True
 
         try:
             return self._train_internal(db)
+        except Exception:
+            # Unexpected error: count it, then propagate exactly as before.
+            prom.record_retrain(_METRIC_MODEL, "failure")
+            raise
         finally:
             with self._retrain_lock:
                 self._is_retraining = False
@@ -223,15 +234,18 @@ class CollaborativeFilterEngine:
 
     def _train_internal(self, db: Session) -> bool:
         logger.info("CF model training started...")
+        started = time.perf_counter()
 
         try:
             interactions = db.query(Interaction).all()
         except Exception as e:
             logger.error(f"Failed to fetch interactions from DB: {e}")
+            prom.record_retrain(_METRIC_MODEL, "failure", started)
             return False
 
         if not interactions:
             logger.warning("No interactions in DB — skipping training.")
+            prom.record_retrain(_METRIC_MODEL, "skipped")
             return False
 
         # Collect unique users and songs
@@ -243,6 +257,7 @@ class CollaborativeFilterEngine:
                 f"Insufficient data: {len(users)} user(s), {len(songs)} song(s). "
                 "Need ≥ 2 of each to train."
             )
+            prom.record_retrain(_METRIC_MODEL, "skipped")
             return False
 
         user_index = {u: idx for idx, u in enumerate(users)}
@@ -288,6 +303,7 @@ class CollaborativeFilterEngine:
             model.fit(user_item_matrix, show_progress=False)
         except Exception as e:
             logger.error(f"ALS fit() failed: {e}", exc_info=True)
+            prom.record_retrain(_METRIC_MODEL, "failure", started)
             return False
 
         version_tag = (
@@ -305,12 +321,14 @@ class CollaborativeFilterEngine:
             self._total_interactions = len(interactions)
             self._total_users = len(users)
             self._total_songs = len(songs)
+            self._last_trained_timestamp = time.time()
 
         logger.info(
             f"CF model trained ✓ | {len(users)} users | {len(songs)} songs | "
             f"{len(interactions)} interactions | factors={actual_factors} | "
             f"version={version_tag}"
         )
+        prom.record_retrain(_METRIC_MODEL, "success", started)
         return True
 
 

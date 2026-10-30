@@ -1,0 +1,60 @@
+{
+  "uid": "mformusic-telemetry",
+  "title": "MforMusic - Telemetry pipeline",
+  "description": "Telemetry ingestion by channel, failures, Kafka consumer state and Spring intake.",
+  "tags": [
+    "mformusic"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "graphTooltip": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "type": "dashboards",
+      "title": "MforMusic dashboards",
+      "tags": [
+        "mformusic"
+      ],
+      "asDropdown": true,
+      "includeVars": false,
+      "keepTime": true
+    },
+    {
+      "type": "link",
+      "title": "Streamlit: per-user history + SHAP",
+      "url": "http://localhost:8501",
+      "targetBlank": true,
+      "icon": "external link",
+      "tooltip": "User-level interaction history and SHAP explanations (not available in Prometheus)"
+    }
+  ],
+  "panels": [
+    {"id":1,"type":"stat","title":"Kafka consumer","datasource":{"type":"prometheus","uid":"prometheus"},"gridPos":{"h":4,"w":4,"x":0,"y":0},"targets":[{"expr":"mformusic_kafka_consumer_enabled","refId":"A"}],"fieldConfig":{"defaults":{"noValue":"n/a","thresholds":{"mode":"absolute","steps":[{"color":"blue","value":null},{"color":"green","value":1}]},"mappings":[{"type":"value","options":{"0":{"text":"HTTP only","color":"blue","index":0},"1":{"text":"CONFIGURED","color":"green","index":1}}}]},"overrides":[]},"options":{"reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"colorMode":"background","graphMode":"none","textMode":"auto"}},
+    {"id":2,"type":"stat","title":"Kafka connected","datasource":{"type":"prometheus","uid":"prometheus"},"gridPos":{"h":4,"w":4,"x":4,"y":0},"targets":[{"expr":"mformusic_kafka_consumer_connected","refId":"A"}],"fieldConfig":{"defaults":{"noValue":"n/a","thresholds":{"mode":"absolute","steps":[{"color":"orange","value":null},{"color":"green","value":1}]},"mappings":[{"type":"value","options":{"0":{"text":"NO","color":"orange","index":0},"1":{"text":"CONNECTED","color":"green","index":1}}}]},"overrides":[]},"description":"Expected NO when the consumer is HTTP only.","options":{"reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"colorMode":"background","graphMode":"none","textMode":"auto"}},
+    {"id":3,"type":"stat","title":"Events accepted (1h)","datasource":{"type":"prometheus","uid":"prometheus"},"gridPos":{"h":4,"w":4,"x":8,"y":0},"targets":[{"expr":"sum(increase(mformusic_telemetry_events_total{result=\"accepted\"}[1h]))","refId":"A"}],"fieldConfig":{"defaults":{"noValue":"n/a"},"overrides":[]},"options":{"reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"colorMode":"value","graphMode":"none","textMode":"auto"}},
+    {"id":4,"type":"stat","title":"Events failed (1h)","datasource":{"type":"prometheus","uid":"prometheus"},"gridPos":{"h":4,"w":4,"x":12,"y":0},"targets":[{"expr":"sum(increase(mformusic_telemetry_events_total{result=\"failed\"}[1h]))","refId":"A"}],"fieldConfig":{"defaults":{"noValue":"n/a","thresholds":{"mode":"absolute","steps":[{"color":"green","value":null},{"color":"red","value":1}]}},"overrides":[]},"options":{"reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"colorMode":"background","graphMode":"none","textMode":"auto"}},
+    {"id":5,"type":"stat","title":"Failure ratio (5m)","datasource":{"type":"prometheus","uid":"prometheus"},"gridPos":{"h":4,"w":4,"x":16,"y":0},"targets":[{"expr":"sum(rate(mformusic_telemetry_events_total{result=\"failed\"}[5m])) / clamp_min(sum(rate(mformusic_telemetry_events_total[5m])), 0.001)","refId":"A"}],"fieldConfig":{"defaults":{"unit":"percentunit","noValue":"n/a","thresholds":{"mode":"absolute","steps":[{"color":"green","value":null},{"color":"orange","value":0.01},{"color":"red","value":0.05}]}},"overrides":[]},"options":{"reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"colorMode":"background","graphMode":"none","textMode":"auto"}},
+    {"id":6,"type":"stat","title":"Kafka errors (1h)","datasource":{"type":"prometheus","uid":"prometheus"},"gridPos":{"h":4,"w":4,"x":20,"y":0},"targets":[{"expr":"sum(increase(mformusic_kafka_consumer_errors_total[1h]))","refId":"A"}],"fieldConfig":{"defaults":{"noValue":"n/a","thresholds":{"mode":"absolute","steps":[{"color":"green","value":null},{"color":"red","value":1}]}},"overrides":[]},"options":{"reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"colorMode":"background","graphMode":"none","textMode":"auto"}},
+    {"id":7,"type":"timeseries","title":"Events/s by channel","datasource":{"type":"prometheus","uid":"prometheus"},"gridPos":{"h":8,"w":12,"x":0,"y":4},"targets":[{"expr":"sum by (channel) (rate(mformusic_telemetry_events_total{result=\"accepted\"}[5m]))","refId":"A","legendFormat":"{{channel}}"}],"fieldConfig":{"defaults":{"unit":"reqps","custom":{"fillOpacity":10,"showPoints":"never"},"min":0},"overrides":[]},"description":"Events received by the FastAPI service, via HTTP or the Kafka consumer.","options":{"tooltip":{"mode":"multi"}}},
+    {"id":8,"type":"timeseries","title":"Failures/s by channel and reason","datasource":{"type":"prometheus","uid":"prometheus"},"gridPos":{"h":8,"w":12,"x":12,"y":4},"targets":[{"expr":"sum by (channel, reason) (rate(mformusic_telemetry_ingest_failures_total[5m]))","refId":"A","legendFormat":"{{channel}} / {{reason}}"}],"fieldConfig":{"defaults":{"unit":"reqps","custom":{"fillOpacity":10,"showPoints":"never"},"min":0},"overrides":[]},"description":"validation = malformed event, database = could not store, other = anything else.","options":{"tooltip":{"mode":"multi"}}},
+    {"id":9,"type":"piechart","title":"Accepted events by type (1h)","datasource":{"type":"prometheus","uid":"prometheus"},"gridPos":{"h":8,"w":8,"x":0,"y":12},"targets":[{"expr":"sum by (interaction_type) (increase(mformusic_telemetry_events_total{result=\"accepted\"}[1h]))","refId":"A","legendFormat":"{{interaction_type}}"}],"fieldConfig":{"defaults":{},"overrides":[]},"options":{"reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"pieType":"donut","legend":{"displayMode":"table","placement":"right","values":["value","percent"]}}},
+    {"id":10,"type":"timeseries","title":"Ingest latency p95 by channel","datasource":{"type":"prometheus","uid":"prometheus"},"gridPos":{"h":8,"w":8,"x":8,"y":12},"targets":[{"expr":"histogram_quantile(0.95, sum by (le, channel) (rate(mformusic_telemetry_ingest_duration_seconds_bucket[5m])))","refId":"A","legendFormat":"{{channel}}"}],"fieldConfig":{"defaults":{"unit":"s","custom":{"fillOpacity":10,"showPoints":"never"},"min":0},"overrides":[]},"options":{"tooltip":{"mode":"multi"}}},
+    {"id":11,"type":"timeseries","title":"Kafka consumer errors/s","datasource":{"type":"prometheus","uid":"prometheus"},"gridPos":{"h":8,"w":8,"x":16,"y":12},"targets":[{"expr":"rate(mformusic_kafka_consumer_errors_total[5m])","refId":"A","legendFormat":"errors"}],"fieldConfig":{"defaults":{"unit":"reqps","custom":{"fillOpacity":10,"showPoints":"never"},"min":0},"overrides":[]},"options":{"tooltip":{"mode":"multi"}}},
+    {"id":12,"type":"timeseries","title":"Spring telemetry endpoint: requests/s by status","datasource":{"type":"prometheus","uid":"prometheus"},"gridPos":{"h":8,"w":12,"x":0,"y":20},"targets":[{"expr":"sum by (status) (rate(http_server_requests_seconds_count{job=\"mformusic-backend\", uri=~\".*telemetry.*\"}[5m]))","refId":"A","legendFormat":"{{status}}"}],"fieldConfig":{"defaults":{"unit":"reqps","custom":{"fillOpacity":10,"showPoints":"never"},"min":0},"overrides":[]},"description":"Intake side, from the Spring Boot job (Micrometer). Compare with the FastAPI panels above to spot forwarding loss.","options":{"tooltip":{"mode":"multi"}}},
+    {"id":13,"type":"timeseries","title":"Spring telemetry endpoint: average latency","datasource":{"type":"prometheus","uid":"prometheus"},"gridPos":{"h":8,"w":12,"x":12,"y":20},"targets":[{"expr":"sum(rate(http_server_requests_seconds_sum{job=\"mformusic-backend\", uri=~\".*telemetry.*\"}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count{job=\"mformusic-backend\", uri=~\".*telemetry.*\"}[5m])), 0.001)","refId":"A","legendFormat":"avg"}],"fieldConfig":{"defaults":{"unit":"s","custom":{"fillOpacity":10,"showPoints":"never"},"min":0},"overrides":[]},"options":{"tooltip":{"mode":"multi"}}},
+    {"id":14,"type":"text","title":"How to read this dashboard","gridPos":{"h":6,"w":24,"x":0,"y":28},"options":{"mode":"markdown","content":"**Pipeline:** Android -> Spring Boot (`/api/v1/telemetry/interactions`) -> Kafka *or* direct HTTP -> FastAPI (`/api/v1/interactions/ingest`) -> PostgreSQL.\n\nThe FastAPI service can only observe the **receiving** side (events accepted/failed per channel). Spring's own forwarding failures are not exported as Prometheus metrics; a growing gap between the *Spring telemetry endpoint* panels and *Events/s by channel* suggests events are being lost in forwarding. The Streamlit dashboard's **Backend received** vs **Available to ML** view shows the same gap per user with actual rows."}}
+  ]
+}
